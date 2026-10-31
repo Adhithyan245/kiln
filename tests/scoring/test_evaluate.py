@@ -102,3 +102,16 @@ def test_bootstrap_is_unavailable_without_an_agreed_method(tmp_path):
     assert first["method"] is None
     assert first["intervals"] == {}
     assert "overlapping precursor clusters" in first["reason"]
+
+
+def test_missing_referenced_compute_request_blocks_label_loading(tmp_path):
+    path, items, labels = fixture(tmp_path)
+    predictions = [json.loads(line) for line in path.read_text().splitlines()]
+    predictions[0]["compute_requests"] = ["missing-request"]
+    path.write_text("\n".join(json.dumps(prediction) for prediction in predictions))
+
+    def load_labels():
+        pytest.fail("labels loaded despite missing compute request")
+
+    with pytest.raises(ValueError, match="missing referenced compute requests.*missing-request"):
+        evaluate(path, items, load_labels, verify_posted_hash=lambda _: True)

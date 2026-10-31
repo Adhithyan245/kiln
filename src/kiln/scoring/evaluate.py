@@ -108,6 +108,10 @@ def evaluate(
     requests = list(compute_requests)
     if len({r.request_id for r in requests}) != len(requests):
         raise ValueError("duplicate compute request ID")
+    referenced = {request_id for prediction in predictions for request_id in prediction.compute_requests}
+    missing = referenced - {request.request_id for request in requests}
+    if missing:
+        raise ValueError(f"missing referenced compute requests: {sorted(missing)}")
     for request in requests:
         if request.item_id not in pred or request.run_id != predictions[0].run_id:
             raise ValueError("compute request does not belong to this run and item set")
