@@ -224,3 +224,58 @@ def test_first_calcs_command_writes_json(tmp_path: Path, cache_dir: Path, monkey
     assert saved["source"].startswith("materials_project:")
     assert saved["device"] == "cpu" and saved["cpu_dry_run"] is True
     assert saved["single_point"]["status"] == "ok" and saved["bounded_relaxation"]["status"] == "ok"
+
+
+# ---------- structure-level tiers (Task 2) ----------
+
+from kiln.compute.tiers import bounded_relaxation, single_point
+
+
+def _structures(cache_dir: Path) -> list:
+    return [structure_from_cache(f, cache_dir).structure for f in ("TiO2", "CaO", "CaTiO3")]
+
+
+def test_single_point_batch_matches_one_by_one(cache_dir: Path) -> None:
+    structures = _structures(cache_dir)
+    calc = factory(FakeMLIP())
+    batch = single_point(structures, {**MLIP, "device": "cpu"}, calculator_factory=calc)
+    singles = [single_point(s, {**MLIP, "device": "cpu"}, calculator_factory=calc).results[0] for s in structures]
+    assert batch.status == ComputeStatus.ok and batch.backend == "ase"
+    assert [r.energy_ev for r in batch.results] == pytest.approx([r.energy_ev for r in singles])
+    assert all(r.steps is None for r in batch.results)
+    assert batch.gpu_seconds == 0.0                      # CPU: no GPU-seconds claimed
+
+
+def test_bounded_relaxation_converged(cache_dir: Path) -> None:
+    run = bounded_relaxation(_structures(cache_dir), {**RELAX, "device": "cpu"}, calculator_factory=factory(FakeMLIP()))
+    assert run.status == ComputeStatus.ok
+    assert all(r.status == ComputeStatus.ok and r.steps is not None and r.steps <= RELAX["max_steps"] for r in run.results)
+
+
+def test_bounded_relaxation_forced_not_converged_keeps_final_numbers(cache_dir: Path) -> None:
+    run = bounded_relaxation(_structures(cache_dir), {**RELAX, "device": "cpu", "max_steps": 2},
+                             calculator_factory=factory(FakeMLIP(stress=0.01)))
+    assert run.status == ComputeStatus.not_converged
+    for r in run.results:
+        assert r.status == ComputeStatus.not_converged and r.steps == 2
+        assert r.max_force_ev_per_a == pytest.approx(0.0)        # forces pass...
+        assert r.max_stress_ev_per_a3 == pytest.approx(0.01)     # ...stress doesn't, and it's reported
+        assert r.energy_ev is not None
+
+
+def test_one_failing_structure_is_reported_not_raised(cache_dir: Path) -> None:
+    run = single_point(_structures(cache_dir), {**MLIP, "device": "cpu"}, calculator_factory=factory(CrashingMLIP()))
+    assert run.status == ComputeStatus.failed
+    assert all(r.status == ComputeStatus.failed and "CUDA out of memory" in r.error for r in run.results)
+
+
+def test_relaxation_tier_reports_worst_phase_mlip_minus_mp(cache_dir: Path) -> None:
+    out = run_tier(ComputeTier.single_point, PAIR, MLIP, cache_dir=cache_dir,
+                   calculator_factory=factory(FakeMLIP(shift={"CaTiO3": 0.03})))
+    assert out.status == ComputeStatus.ok
+    assert out.result["max_abs_phase_mlip_minus_mp_ev_per_atom"] == pytest.approx(0.03)
+
+
+def test_unbuilt_backend_is_refused_loudly(cache_dir: Path) -> None:
+    with pytest.raises(NotImplementedError):
+        single_point(_structures(cache_dir), {**MLIP, "backend": "nvalchemi"}, calculator_factory=factory(FakeMLIP()))

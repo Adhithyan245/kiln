@@ -26,8 +26,9 @@ import os
 import platform
 import subprocess
 import time
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -38,11 +39,12 @@ from pymatgen.io.ase import AseAtomsAdaptor
 
 from kiln.compute.backends import BackendResult, Result
 from kiln.compute.convergence import converged, max_force, max_stress
+from kiln.compute.energy_reference import corrected_entry, phase_differences
 from kiln.schemas import ComputeStatus, ComputeTier
 from kiln.tools import mp
 
-__all__ = ["CalculatorFactory", "LocalBackend", "first_calcs", "mace_calculator", "run_tier",
-           "structure_from_cache"]
+__all__ = ["CalculatorFactory", "LocalBackend", "StructureResult", "TierRun", "bounded_relaxation",
+           "first_calcs", "mace_calculator", "run_tier", "single_point", "structure_from_cache"]
 
 FIRST_CALCS_PATH = Path("cache") / "first_calcs.json"
 TIER_SETTINGS_PATH = Path("env") / "gb10" / "tier_settings.json"
@@ -127,22 +129,17 @@ def _mlip(tier: ComputeTier, inputs: dict[str, Any], settings: dict[str, Any], c
         return BackendResult(ComputeStatus.failed,
                              {"error": f"structures above max_atoms={max_atoms}: {', '.join(map(str, too_big))}"})
 
-    calc = calculator_factory(settings)
     relax = tier == ComputeTier.bounded_relaxation
-    mlip_entries: list[ComputedEntry] = []
-    not_converged: list[str] = []
-    steps_used = 0
-    for entry in phases:
-        atoms = AseAtomsAdaptor.get_atoms(entry.structure)
-        atoms.calc = calc
-        if relax:
-            ok, steps = _relax(atoms, settings)
-            steps_used = max(steps_used, steps)
-            if not ok:
-                not_converged.append(str(entry.entry_id))
-        energy = float(atoms.get_potential_energy())          # raw MLIP total, eV, for this cell
-        mlip_entries.append(ComputedEntry(entry.composition, energy, correction=entry.correction,
-                                          entry_id=entry.entry_id))
+    run = (bounded_relaxation if relax else single_point)(
+        [e.structure for e in phases], settings, calculator_factory=calculator_factory)
+    failed = [f"{e.entry_id}: {r.error}" for e, r in zip(phases, run.results) if r.status == ComputeStatus.failed]
+    if failed:
+        return BackendResult(ComputeStatus.failed, {"error": "; ".join(failed)})
+    totals = [float(r.energy_ev) for r in run.results]       # raw MLIP totals, eV, for each cell
+    mlip_entries = [corrected_entry(e, total) for e, total in zip(phases, totals)]
+    not_converged = [str(e.entry_id) for e, r in zip(phases, run.results) if r.status == ComputeStatus.not_converged]
+    steps_used = max((r.steps or 0 for r in run.results), default=0)
+    worst_phase = max(abs(d.mlip_minus_mp_ev_per_atom) for d in phase_differences(phases, totals))
 
     mlip_r = mp.reaction_energy(a, b, mlip_entries)
     mp_r = mp.reaction_energy(a, b, phases)
@@ -150,6 +147,7 @@ def _mlip(tier: ComputeTier, inputs: dict[str, Any], settings: dict[str, Any], c
         **_reaction_result(mlip_r),
         "dE_mp_ev_per_atom": mp_r.dE_ev_per_atom,
         "dE_mlip_minus_mp_ev_per_atom": mlip_r.dE_ev_per_atom - mp_r.dE_ev_per_atom,
+        "max_abs_phase_mlip_minus_mp_ev_per_atom": worst_phase,
         "mp_products": mp_r.products,
         "model": str(settings["model"]),
         "n_structures": len(phases),
@@ -175,6 +173,89 @@ def _relax(atoms: Any, settings: dict[str, Any]) -> tuple[bool, int]:
         if converged(atoms.get_forces(), atoms.get_stress(), fmax, s_tol):
             return True, opt.nsteps
     return converged(atoms.get_forces(), atoms.get_stress(), fmax, s_tol), opt.nsteps
+
+
+# ---------- structure-level tiers ----------
+
+@dataclass(frozen=True)
+class StructureResult:
+    """One structure's outcome. Energies are raw MLIP values for the given cell (no MP2020
+    correction; see kiln.compute.energy_reference)."""
+    status: ComputeStatus
+    n_atoms: int
+    energy_ev: float | None = None
+    energy_ev_per_atom: float | None = None
+    max_force_ev_per_a: float | None = None
+    max_stress_ev_per_a3: float | None = None
+    steps: int | None = None            # relaxation only
+    error: str = ""
+
+
+@dataclass(frozen=True)
+class TierRun:
+    tier: ComputeTier
+    backend: str
+    settings: dict[str, Any]
+    results: list[StructureResult] = field(default_factory=list)
+    wall_s: float = 0.0
+    gpu_seconds: float = 0.0            # wall time on a CUDA device; 0 on CPU
+
+    @property
+    def status(self) -> ComputeStatus:
+        """failed if any structure failed, else not_converged if any didn't converge, else ok."""
+        statuses = {r.status for r in self.results}
+        for worst in (ComputeStatus.failed, ComputeStatus.not_converged):
+            if worst in statuses:
+                return worst
+        return ComputeStatus.ok
+
+
+def single_point(structures: Structure | Sequence[Structure], settings: dict[str, Any], *,
+                 calculator_factory: CalculatorFactory | None = None) -> TierRun:
+    """MLIP energy, forces and stress of each structure as given."""
+    return _run_structures(ComputeTier.single_point, structures, settings, calculator_factory)
+
+
+def bounded_relaxation(structures: Structure | Sequence[Structure], settings: dict[str, Any], *,
+                       calculator_factory: CalculatorFactory | None = None) -> TierRun:
+    """Variable-cell relaxation of each structure: converged only when max force <= fmax_ev_per_a
+    AND max |stress| <= stress_tol_ev_per_a3, within max_steps; otherwise not_converged."""
+    return _run_structures(ComputeTier.bounded_relaxation, structures, settings, calculator_factory)
+
+
+def _run_structures(tier: ComputeTier, structures: Structure | Sequence[Structure],
+                    settings: dict[str, Any], calculator_factory: CalculatorFactory | None) -> TierRun:
+    backend = str(settings.get("backend", "ase"))
+    if backend != "ase":
+        # "nvalchemi" (NVIDIA ALCHEMI Toolkit batched FIRE2 with a variable cell) is built and checked
+        # against this ASE path on the GB10, from the kit's alchemi-mlip-test.py recipe.
+        raise NotImplementedError(f"backend {backend!r} is not available yet; use 'ase'")
+    items = [structures] if isinstance(structures, Structure) else list(structures)
+    device = str(settings.get("device", "cuda"))
+    calc = (calculator_factory or mace_calculator)(settings)
+    relax = tier == ComputeTier.bounded_relaxation
+    results: list[StructureResult] = []
+    _sync(device)
+    start = time.perf_counter()
+    for structure in items:
+        n = len(structure)
+        try:
+            atoms = AseAtomsAdaptor.get_atoms(structure)
+            atoms.calc = calc
+            steps = None
+            status = ComputeStatus.ok
+            if relax:
+                ok, steps = _relax(atoms, settings)
+                status = ComputeStatus.ok if ok else ComputeStatus.not_converged
+            energy = float(atoms.get_potential_energy())
+            results.append(StructureResult(status, n, energy, energy / n, max_force(atoms.get_forces()),
+                                           max_stress(atoms.get_stress()), steps))
+        except Exception as exc:  # one bad structure is a logged failure, never a crash or a gap
+            results.append(StructureResult(ComputeStatus.failed, n, error=f"{type(exc).__name__}: {exc}"))
+    _sync(device)
+    wall = time.perf_counter() - start
+    gpu = wall if device.startswith("cuda") else 0.0
+    return TierRun(tier, backend, dict(settings), results, round(wall, 3), round(gpu, 3))
 
 
 def run_tier(tier: ComputeTier, inputs: dict[str, Any], settings: dict[str, Any], *,
@@ -215,9 +296,12 @@ def structure_from_cache(formula: str, cache_dir: Path = mp.CACHE_DIR) -> Comput
 def _sync(device: str) -> None:
     """Wait for queued GPU work so wall time measures the calculation, not the launch."""
     if str(device).startswith("cuda"):
-        import torch
-
-        torch.cuda.synchronize()
+        try:
+            import torch
+        except ImportError:  # fake calculators in tests need no torch
+            return
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
 
 
 def _measure(atoms: Any) -> dict[str, float]:
