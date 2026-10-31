@@ -11,15 +11,31 @@ Reported on all pairs, flagged included: binary AUROC and Brier, four-class
 accuracy and macro-F1, coverage, flagged and unflagged accuracy, and compute
 accounting (totals, per tier, per tier and status). Bootstrap intervals and
 "correct changes" are unavailable until their definitions are agreed.
+
+A ``hard_subset`` slice is reported next to the all-pairs metrics, never
+instead of them, when the caller supplies a per-item thermodynamic-competition
+margin (computed upstream, e.g. by the B60meV baseline; None when unknown) and a
+margin threshold. Every item goes into exactly one bucket, decided before labels
+are loaded and from margins and formula text only:
+
+- ``hard``: the margin is known and below the threshold, or a precursor formula
+  matches a carbonate, hydroxide or ammonium rule (``HARD_SUBSET_FORMULA_RULES``);
+- ``easy``: the margin is known, at or above the threshold, and no formula rule matches;
+- ``unknown``: the margin is unknown and no formula rule matches.
+
+Each bucket reports the same metrics as all pairs, plus counts by trigger. This
+module computes no energies.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import math
+import re
 from bisect import bisect_left, bisect_right
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 from kiln.schemas import Category, ComputeRequest, ComputeTier, Item, Label, Prediction
@@ -27,6 +43,132 @@ from kiln.schemas import Category, ComputeRequest, ComputeTier, Item, Label, Pre
 
 class EvaluationLockedError(RuntimeError):
     """The prediction commitment could not be independently verified."""
+
+
+# ---------- Hard subset (formula text and caller-supplied margins only) ----------
+
+HARD_SUBSET_MARGIN_TRIGGER = "margin_below_threshold"
+
+# Regular expressions over the formula text, matched case-sensitively after
+# Unicode subscript digits become ASCII digits. An uppercase letter always
+# starts an element symbol, so "CO3" is carbon then oxygen (never Co), "OH" is
+# oxygen then hydrogen, and "NH4" is nitrogen then hydrogen (never Na, Nb, Ni).
+# The rules assume conventional ion-group notation (Li2CO3, Mg(OH)2, NH4Cl).
+# They do NOT recognise formulas reordered by electronegativity, as pymatgen's
+# reduced_formula writes them (LiHO, Mg(HO)2, H4NCl, Cu2H2CO5): those match no
+# rule. The per-formula table in the report shows what each formula matched.
+HARD_SUBSET_FORMULA_RULES: Mapping[str, str] = MappingProxyType({
+    # CO3 not followed by a digit. Bicarbonate (HCO3) counts; oxalate (C2O4) does not.
+    "carbonate": r"CO3(?![0-9])",
+    # O then H, where H is not the start of He, Hf, Hg, Ho or Hs. Oxyhydroxides
+    # (FeOOH) count; water of crystallization (·H2O) does not.
+    "hydroxide": r"OH(?![a-z])",
+    # NH4 not followed by a digit. Ammonia (NH3), hydrazine (N2H4) and
+    # substituted ammonium (N(CH3)4) do not count.
+    "ammonium": r"NH4(?![0-9])",
+})
+_FORMULA_PATTERNS = {name: re.compile(pattern) for name, pattern in HARD_SUBSET_FORMULA_RULES.items()}
+_SUBSCRIPT_DIGITS = str.maketrans("₀₁₂₃₄₅₆₇₈₉", "0123456789")
+HARD_SUBSET_TRIGGERS = (HARD_SUBSET_MARGIN_TRIGGER, *HARD_SUBSET_FORMULA_RULES)
+HARD_SUBSET_BUCKETS = ("hard", "easy", "unknown")
+
+
+def formula_triggers(formula: str) -> tuple[str, ...]:
+    """Names of the hard-subset formula rules that ``formula`` matches, in rule order."""
+    if not isinstance(formula, str):
+        raise TypeError(f"formula must be a str, got {type(formula).__name__}")
+    text = formula.translate(_SUBSCRIPT_DIGITS)
+    return tuple(name for name, pattern in _FORMULA_PATTERNS.items() if pattern.search(text))
+
+
+def _is_real(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _hard_subset_assign(
+    item_map: dict[str, Item],
+    margins: Mapping[str, float | None] | None,
+    threshold: float | None,
+) -> dict[str, Any] | None:
+    """Validate the hard-subset inputs and put every item in one bucket.
+
+    Runs before labels are loaded, so labels cannot influence the assignment and
+    bad inputs never cause a label read. Returns None when neither input is given.
+    """
+    if margins is None and threshold is None:
+        return None
+    if margins is None or threshold is None:
+        raise ValueError(
+            "hard_subset_margins and hard_subset_margin_threshold_ev_per_atom must be supplied together"
+        )
+    if not isinstance(margins, Mapping):
+        raise TypeError(f"hard_subset_margins must be a mapping, got {type(margins).__name__}")
+    if not _is_real(threshold) or threshold <= 0:
+        raise ValueError("hard_subset_margin_threshold_ev_per_atom must be a finite number above 0")
+    missing = sorted(set(item_map) - set(margins))
+    if missing:
+        raise ValueError(f"no hard-subset margin entry for items {missing}; state None for an unknown margin")
+    unknown = sorted(set(margins) - set(item_map), key=str)
+    if unknown:
+        raise ValueError(f"hard-subset margin entries for unknown items: {unknown}")
+    for item_id, margin in margins.items():
+        if margin is None:
+            continue
+        if not _is_real(margin):
+            raise ValueError(f"hard-subset margin for {item_id!r} must be a finite number or None, got {margin!r}")
+        if margin < 0:
+            raise ValueError(
+                f"hard-subset margin for {item_id!r} is negative ({margin!r}); a competition margin "
+                "(dE_competing - dE_best) is nonnegative by construction"
+            )
+    formula_table = {
+        formula: list(formula_triggers(formula))
+        for formula in sorted({f for item in item_map.values() for f in (item.precursor_a, item.precursor_b)})
+    }
+    assignments = []
+    for item_id in sorted(item_map):
+        item, margin = item_map[item_id], margins[item_id]
+        triggers = [HARD_SUBSET_MARGIN_TRIGGER] if margin is not None and margin < threshold else []
+        matched = set(formula_table[item.precursor_a]) | set(formula_table[item.precursor_b])
+        triggers += [name for name in HARD_SUBSET_FORMULA_RULES if name in matched]
+        bucket = "hard" if triggers else "unknown" if margin is None else "easy"
+        assignments.append({
+            "item_id": item_id,
+            "bucket": bucket,
+            "margin_ev_per_atom": None if margin is None else float(margin),
+            "triggers": triggers,
+        })
+    return {"threshold": float(threshold), "assignments": assignments, "formula_triggers": formula_table}
+
+
+def _hard_subset_report(plan: dict[str, Any] | None, rows: dict[str, tuple[Prediction, Label]]) -> dict[str, Any]:
+    if plan is None:
+        return {
+            "available": False,
+            "reason": "Unavailable: no per-item margins and margin threshold were supplied.",
+        }
+    assignments = plan["assignments"]
+    by_bucket = {bucket: [a["item_id"] for a in assignments if a["bucket"] == bucket] for bucket in HARD_SUBSET_BUCKETS}
+    if sum(map(len, by_bucket.values())) != len(rows) or {a["item_id"] for a in assignments} != set(rows):
+        raise RuntimeError("hard-subset buckets must hold every evaluated item exactly once")
+    hard = [a for a in assignments if a["bucket"] == "hard"]
+    return {
+        "available": True,
+        "definition": {
+            "margin_threshold_ev_per_atom": plan["threshold"],
+            "hard": "margin_ev_per_atom known and < margin_threshold_ev_per_atom, or any precursor formula matches a formula rule",
+            "easy": "margin_ev_per_atom known and >= margin_threshold_ev_per_atom, and no formula rule matches",
+            "unknown": "margin_ev_per_atom unknown and no formula rule matches",
+            "formula_rules": dict(HARD_SUBSET_FORMULA_RULES),
+            "formula_notation": "conventional ion-group notation; electronegativity-ordered formulas (e.g. LiHO) match no rule",
+        },
+        "n": len(rows),
+        **{bucket: _slice_metrics([rows[item_id] for item_id in ids]) for bucket, ids in by_bucket.items()},
+        "trigger_counts": {trigger: sum(trigger in a["triggers"] for a in assignments) for trigger in HARD_SUBSET_TRIGGERS},
+        "hard_with_unknown_margin": sum(a["margin_ev_per_atom"] is None for a in hard),
+        "formula_triggers": plan["formula_triggers"],
+        "assignments": assignments,
+    }
 
 
 def _unique(rows: Iterable[Any], name: str) -> dict[str, Any]:
@@ -87,6 +229,26 @@ def _metrics(rows: list[tuple[Prediction, Label]]) -> dict[str, Any]:
     }
 
 
+def _slice_metrics(rows: list[tuple[Prediction, Label]]) -> dict[str, Any]:
+    """``_metrics`` for a slice that may be empty: an empty slice reports n = 0
+    and None for every rate, never 0 and never a division error."""
+    if rows:
+        return _metrics(rows)
+    return {
+        "n": 0,
+        "auroc": None,
+        "four_class_accuracy": None,
+        "four_class_macro_f1": None,
+        "four_class_f1": _f1_by_class([]),
+        "brier": None,
+        "coverage": None,
+        "flagged_accuracy": None,
+        "unflagged_accuracy": None,
+        "flagged_n": 0,
+        "unflagged_n": 0,
+    }
+
+
 def _tally(requests: list[ComputeRequest], moved: dict[str, bool | None]) -> dict[str, Any]:
     # changed_prediction is counted as logged; its definition is OPEN-17, so it
     # is neither derived from the before/after scores nor checked against them.
@@ -123,6 +285,8 @@ def evaluate(
     compute_requests: Iterable[ComputeRequest] = (),
     bootstrap_samples: int = 1000,
     bootstrap_seed: int = 0,
+    hard_subset_margins: Mapping[str, float | None] | None = None,
+    hard_subset_margin_threshold_ev_per_atom: float | None = None,
 ) -> dict[str, Any]:
     """Evaluate one frozen JSONL run after independent confirmation of its hash.
 
@@ -130,6 +294,12 @@ def evaluate(
     A missing score on either side leaves movement unknown; equal distance is
     reported as False. Macro-F1 is None unless all four categories appear in the
     labels or predictions. Bootstrap intervals are unavailable pending an agreed method for overlapping clusters.
+
+    ``hard_subset_margins`` maps every item ID to its competition margin in
+    eV/atom (None when unknown); ``hard_subset_margin_threshold_ev_per_atom`` has
+    no default. Supply both for the ``hard_subset`` slice, or neither, in which
+    case the slice is reported as unavailable. Both are checked, and every item
+    assigned to a bucket, before labels are loaded.
     """
     if not isinstance(bootstrap_samples, int) or isinstance(bootstrap_samples, bool) or bootstrap_samples < 0:
         raise ValueError("bootstrap_samples must be a nonnegative integer")
@@ -179,6 +349,7 @@ def evaluate(
                 raise ValueError("request scores must be finite and between 0 and 1")
         if not math.isfinite(request.compute_units) or request.compute_units < 0 or not math.isfinite(request.gpu_seconds) or request.gpu_seconds < 0:
             raise ValueError("request costs must be finite and nonnegative")
+    hard_plan = _hard_subset_assign(item_map, hard_subset_margins, hard_subset_margin_threshold_ev_per_atom)
     labels = _unique(load_labels(), "label")
     if set(labels) != set(pred):
         raise ValueError("labels and predictions must contain the same item IDs")
@@ -200,6 +371,7 @@ def evaluate(
         "split": splits.pop(),
         "source": sources.pop(),
         "metrics": _metrics(list(rows.values())),
+        "hard_subset": _hard_subset_report(hard_plan, rows),
         "bootstrap": _bootstrap(bootstrap_samples, bootstrap_seed),
         "compute_total": _tally(requests, moved),
         "compute_by_tier": [{"tier": tier.value, **_tally([r for r in requests if r.tier == tier], moved)} for tier in ComputeTier],
