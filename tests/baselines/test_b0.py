@@ -10,6 +10,8 @@ from typing import get_args
 from pydantic import ValidationError
 
 from kiln.baselines.b0 import (
+    PREDICTION_BLOCKERS,
+    BaselinePredictionUnavailable,
     DrivingForceConfig,
     DrivingForceDecision,
     DrivingForceInput,
@@ -19,8 +21,9 @@ from kiln.baselines.b0 import (
     b0_tammann,
     run_b0,
     run_b0_t,
+    to_predictions,
 )
-from kiln.schemas import ConditionId, Item, ReviewFlag, ReviewReason
+from kiln.schemas import ConditionId, Item, ReviewFlag, ReviewReason, RunConfig
 
 
 def synthetic_item(item_id="syn-1", temperature_c=700.0, mp_a=None, mp_b=None, split="dev"):
@@ -281,6 +284,49 @@ class SchemaCompatibilityTests(unittest.TestCase):
         forbidden = {"category", "reacted", "label", "labels"}
         for model in (DrivingForceDecision, TammannDecision, DrivingForceInput):
             self.assertFalse(forbidden & set(model.model_fields), model.__name__)
+
+
+def run_config(condition):
+    return RunConfig(run_id="syn-run", condition=condition, seed=0, model="synthetic-no-llm")
+
+
+class ToPredictionsTests(unittest.TestCase):
+    def setUp(self):
+        items = [synthetic_item("syn-1", mp_a=1000.0, mp_b=1500.0),
+                 synthetic_item("syn-2", mp_a=1000.0, mp_b=None)]
+        self.b0 = run_b0(items, [energy("syn-1", -0.5), energy("syn-2", None, evidence=())],
+                         DrivingForceConfig(dE_threshold_ev_per_atom=-0.25))
+        self.b0_t = run_b0_t(items, TammannConfig(tammann_fraction=0.5, require="either"))
+
+    def test_valid_inputs_fail_closed_and_name_every_blocker(self):
+        for condition, decisions in (("B0", self.b0), ("B0-T", self.b0_t)):
+            for supplied in (decisions, iter(decisions)):
+                with self.subTest(condition=condition, supplied=type(supplied).__name__):
+                    with self.assertRaises(BaselinePredictionUnavailable) as caught:
+                        to_predictions(supplied, run_config(condition))
+                    message = str(caught.exception)
+                    for blocker in PREDICTION_BLOCKERS:
+                        self.assertIn(blocker, message)
+        joined = " ".join(PREDICTION_BLOCKERS)
+        for reference in ("score.py", "AgentName", "OPEN-08", "OPEN-23", "OPEN-16"):
+            self.assertIn(reference, joined)
+
+    def test_unavailable_is_distinct_from_wiring_errors(self):
+        self.assertFalse(issubclass(BaselinePredictionUnavailable, (TypeError, ValueError)))
+
+    def test_wiring_mistakes_are_reported_before_failing_closed(self):
+        with self.assertRaises(TypeError):
+            to_predictions(self.b0, run_config("B0").model_dump())
+        with self.assertRaisesRegex(ValueError, "not B0 or B0-T"):
+            to_predictions(self.b0, run_config("C1"))
+        with self.assertRaises(TypeError):
+            to_predictions(self.b0_t, run_config("B0"))
+        with self.assertRaises(TypeError):
+            to_predictions(self.b0, run_config("B0-T"))
+        with self.assertRaisesRegex(ValueError, "at least one decision"):
+            to_predictions(iter(()), run_config("B0"))
+        with self.assertRaisesRegex(ValueError, "duplicate decision"):
+            to_predictions([self.b0[0], self.b0[0]], run_config("B0"))
 
 
 if __name__ == "__main__":

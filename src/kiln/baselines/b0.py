@@ -7,10 +7,12 @@ reads labels, calls the compute service or looks anything up. B0 takes reaction
 energies the caller already obtained through logged compute requests; B0-T takes
 the melting points carried on each ``Item``.
 
-Outputs are decisions, not ``Prediction`` objects. Turning a margin into
-``p_react`` and a binary decision into a four-class ``Category`` needs protocol
-decisions that have not been made. The margin is a ranking score in physical
-units, not a probability. A missing input gives an undetermined decision with a
+Outputs are decisions, not ``Prediction`` objects, and ``to_predictions`` fails
+closed: the shared schema says only ``score.py`` builds Predictions from
+verifier-accepted artifacts, and turning a margin into ``p_react`` and a binary
+decision into a four-class ``Category`` needs protocol decisions (OPEN-08) that
+have not been made. The margin is a ranking score in physical units, not a
+probability. A missing input gives an undetermined decision with a
 ``missing_evidence`` review flag; it is never imputed or dropped.
 """
 from __future__ import annotations
@@ -21,7 +23,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from kiln.schemas import Item, ReviewFlag, ReviewReason
+from kiln.schemas import Item, Prediction, ReviewFlag, ReviewReason, RunConfig
 
 KELVIN_OFFSET = 273.15  # °C to K; a unit conversion, not a tuned value
 
@@ -268,3 +270,48 @@ def b0_tammann(item: Item, config: TammannConfig) -> TammannDecision:
 def run_b0_t(items: Iterable[Item], config: TammannConfig) -> list[TammannDecision]:
     """Apply B0-T to every item, in order."""
     return [b0_tammann(item, config) for item in _read_items(items)]
+
+
+# ---------- Predictions (fail closed) ----------
+
+class BaselinePredictionUnavailable(RuntimeError):
+    """B0 and B0-T decisions cannot yet become ``Prediction`` objects."""
+
+
+PREDICTION_BLOCKERS = (
+    "schemas.Prediction is documented as produced only by src/kiln/scoring/score.py from "
+    "verifier-accepted artifacts, but B0 and B0-T produce no artifact and the schema cannot "
+    "describe one (Artifact.agent has no baseline AgentName, Artifact.type no baseline "
+    "report), so a team decision on the shared schema is needed",
+    "protocol OPEN-08 has not fixed how a margin or decision maps to p_react in [0, 1], how a "
+    "binary decision maps to a four-class category, the cause and fix text, or the outcome "
+    "for an undetermined decision, which the evaluator still needs (see also OPEN-23)",
+    "protocol OPEN-08 has not fixed how B0's cached_lookup requests are charged or which "
+    "run's compute log holds them, so the prediction cost cannot be derived",
+    "no trusted verifier of a frozen configuration exists yet (Gate P, OPEN-16)",
+)
+
+
+def to_predictions(
+    decisions: Iterable[DrivingForceDecision | TammannDecision], config: RunConfig
+) -> list[Prediction]:
+    """Fail closed: always raises ``BaselinePredictionUnavailable`` (see
+    ``PREDICTION_BLOCKERS``). Inputs are checked first so that wiring mistakes
+    are reported as such. No p_react, category, cause, fix, cost or freeze
+    state is chosen here."""
+    _expect(config, RunConfig, "config")
+    expected = {"B0": DrivingForceDecision, "B0-T": TammannDecision}.get(config.condition)
+    if expected is None:
+        raise ValueError(f"run condition {config.condition!r} is not B0 or B0-T")
+    read = list(decisions)
+    if not read:
+        raise ValueError("at least one decision is required")
+    seen: set[str] = set()
+    for decision in read:
+        _expect(decision, expected, "decision")
+        if decision.item_id in seen:
+            raise ValueError(f"duplicate decision for {decision.item_id!r}")
+        seen.add(decision.item_id)
+    raise BaselinePredictionUnavailable(
+        "B0 and B0-T decisions cannot become Predictions yet: " + "; ".join(PREDICTION_BLOCKERS) + "."
+    )
