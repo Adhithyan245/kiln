@@ -15,9 +15,9 @@ from kiln.tools.tammann import checked_tammann_c
 class Kinetics(Agent):
     name = "kinetics"
 
-    def __init__(self, *, config: RunConfig, energy_margin_ev_per_atom: float | None = None) -> None:
-        if not isinstance(config, RunConfig):
-            raise TypeError("A RunConfig is required for model selection")
+    def __init__(self, *, config: RunConfig | None = None, energy_margin_ev_per_atom: float | None = None) -> None:
+        if config is not None and not isinstance(config, RunConfig):
+            raise TypeError("config must be a RunConfig")
         if energy_margin_ev_per_atom is not None and (isinstance(energy_margin_ev_per_atom, bool)
                 or not math.isfinite(energy_margin_ev_per_atom) or energy_margin_ev_per_atom < 0):
             raise ValueError("Energy margin must be finite and nonnegative")
@@ -25,14 +25,18 @@ class Kinetics(Agent):
         self.config = config
 
     def step(self, item: Item, board: Board, budget: Budget) -> None:
-        if self.config.run_id != board.run_id:
+        board_config = getattr(board, "config", None)
+        config = self.config or board_config
+        if not isinstance(config, RunConfig):
+            raise TypeError("A RunConfig is required for model selection")
+        if config.run_id != board.run_id or (board_config is not None and config != board_config):
             raise ValueError("Agent config does not match the board run")
         prior = board.artifacts(item.item_id)
         if not any(a.agent == self.name for a in prior):
             before = budget.spent
             selected = llm_choose(["gather_temperature", "skip"],
                 f"Kinetics for {item.precursor_a} and {item.precursor_b} at {item.temperature_c} C. "
-                "Rule recommends gathering reported temperature evidence.", budget, self.config,
+                "Rule recommends gathering reported temperature evidence.", budget, config,
                 system="Choose an action; never supply numerical evidence.")
             if not selected:
                 raise ValueError("Kinetics model returned no valid action")
@@ -75,7 +79,7 @@ class Kinetics(Agent):
                 recommended = "firm_up_energy" if abs(value) <= self.energy_margin else "skip"
                 options = [recommended, "skip" if recommended != "skip" else "firm_up_energy"]
                 chosen = llm_choose(options, f"Rule recommends {recommended}; energy is {value} eV/atom. "
-                    f"Remaining budget: {budget.remaining()}.", budget, self.config,
+                    f"Remaining budget: {budget.remaining()}.", budget, config,
                     system="Choose an action; never supply numerical evidence.")
                 if not chosen:
                     raise ValueError("Kinetics model returned no valid action")

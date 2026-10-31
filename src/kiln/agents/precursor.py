@@ -13,14 +13,18 @@ from kiln.tools.precursors import props
 class Precursor(Agent):
     name = "precursor"
 
-    def __init__(self, compute=None, *, config: RunConfig) -> None:
-        if not isinstance(config, RunConfig):
-            raise TypeError("A RunConfig is required for model selection")
+    def __init__(self, compute=None, *, config: RunConfig | None = None) -> None:
+        if config is not None and not isinstance(config, RunConfig):
+            raise TypeError("config must be a RunConfig")
         self.compute = compute or client
         self.config = config
 
     def step(self, item: Item, board: Board, budget: Budget) -> None:
-        if self.config.run_id != board.run_id:
+        board_config = getattr(board, "config", None)
+        config = self.config or board_config
+        if not isinstance(config, RunConfig):
+            raise TypeError("A RunConfig is required for model selection")
+        if config.run_id != board.run_id or (board_config is not None and config != board_config):
             raise ValueError("Agent config does not match the board run")
         for need in board.open_needs(item.item_id, ("decomposition_products",)):
             formula = need.payload.get("formula")
@@ -28,7 +32,7 @@ class Precursor(Agent):
                 continue
             before = budget.spent
             choice = llm_choose(["answer_need", "skip"], f"Rule recommends answering the precursor-property need for {formula}.",
-                                budget, self.config, system="Choose an action; never supply numerical evidence.")
+                                budget, config, system="Choose an action; never supply numerical evidence.")
             if not choice:
                 raise ValueError("Precursor model returned no valid action")
             action = choice[0]
@@ -65,7 +69,7 @@ class Precursor(Agent):
             return
         start = budget.spent
         chosen = llm_choose(["gather_properties", "skip"],
-            f"Rule recommends gathering properties for {item.precursor_a} and {item.precursor_b}.", budget, self.config,
+            f"Rule recommends gathering properties for {item.precursor_a} and {item.precursor_b}.", budget, config,
             system="Choose an action; never supply numerical evidence.")
         if not chosen:
             raise ValueError("Precursor model returned no valid action")
@@ -97,7 +101,7 @@ class Precursor(Agent):
             options = [recommended, "skip" if reached else "decomposition_reeval"]
             chosen = llm_choose(options, f"Rule recommends {recommended}; furnace temperature {item.temperature_c} C. "
                 f"Sourced precursor reference values: {properties}. Conditions may differ; remaining budget: {budget.remaining()}.",
-                budget, self.config, system="Choose an action; never supply numerical evidence.")
+                budget, config, system="Choose an action; never supply numerical evidence.")
             if not chosen:
                 raise ValueError("Precursor model returned no valid action")
             action = chosen[0]

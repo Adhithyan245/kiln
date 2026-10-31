@@ -118,7 +118,7 @@ def test_real_specialists_work_with_verifying_runner_and_stub_compute(tmp_path):
         tier_prices={"cached_lookup": 1.0, "single_point": 1.0, "decomposition_reeval": 1.0})
     compute = StubCompute(run, config.tier_prices)
     components = Components(compute=lambda path, cfg: compute,
-        specialists=lambda c, cfg: [Precursor(c, config=cfg), Thermo(c, config=cfg), Kinetics(config=cfg)],
+        specialists=lambda c, cfg: [Precursor(c), Thermo(c), Kinetics()],
         tool_values=item_tool_values, flags=flags, scorer=StubScorer, stubs=True)
     item = Item(item_id="example", source="alab_demo", precursor_a="CaCO3", precursor_b="TiO2",
                 temperature_c=900, melting_point_a_c=825, melting_point_b_c=1843, split="dev")

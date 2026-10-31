@@ -14,10 +14,10 @@ from kiln.schemas import Artifact, Claim, ComputeStatus, ComputeTier, Cost, Item
 class Thermo(Agent):
     name = "thermo"
 
-    def __init__(self, compute=None, *, config: RunConfig, energy_margin_ev_per_atom: float | None = None,
+    def __init__(self, compute=None, *, config: RunConfig | None = None, energy_margin_ev_per_atom: float | None = None,
                  disagreement_threshold_ev_per_atom: float | None = None) -> None:
-        if not isinstance(config, RunConfig):
-            raise TypeError("A RunConfig is required for model selection")
+        if config is not None and not isinstance(config, RunConfig):
+            raise TypeError("config must be a RunConfig")
         for value in (energy_margin_ev_per_atom, disagreement_threshold_ev_per_atom):
             if value is not None and (isinstance(value, bool) or not math.isfinite(value) or value < 0):
                 raise ValueError("Escalation thresholds must be finite and nonnegative")
@@ -27,7 +27,11 @@ class Thermo(Agent):
         self.disagreement_threshold = disagreement_threshold_ev_per_atom
 
     def step(self, item: Item, board: Board, budget: Budget) -> None:
-        if self.config.run_id != board.run_id:
+        board_config = getattr(board, "config", None)
+        config = self.config or board_config
+        if not isinstance(config, RunConfig):
+            raise TypeError("A RunConfig is required for model selection")
+        if config.run_id != board.run_id or (board_config is not None and config != board_config):
             raise ValueError("Agent config does not match the board run")
         start = budget.spent
         previous = [a for a in board.artifacts(item.item_id) if a.agent == self.name]
@@ -84,7 +88,7 @@ class Thermo(Agent):
         context = (f"Thermo for {item.precursor_a} and {item.precursor_b} at {item.temperature_c} C. "
                    f"Accepted evidence: {observed}. Rule recommendation: {recommended}. {reason} "
                    f"Remaining budget: {budget.remaining()}.")
-        chosen = llm_choose(options, context, budget, self.config, system="Choose an action; do not supply numerical values.")
+        chosen = llm_choose(options, context, budget, config, system="Choose an action; do not supply numerical values.")
         if not chosen:
             raise ValueError("Thermo model returned no valid action")
         action = chosen[0]
