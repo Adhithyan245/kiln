@@ -1,5 +1,8 @@
 """Synthetic evidence tests; no experimental outcomes are used."""
+import hashlib
+import json
 import math
+import random
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -226,6 +229,126 @@ def test_engine_wraps_verifier_errors_and_passes_the_digest():
         ScoringEngine(rules.model_dump(), config, verify_frozen_rules=lambda d: True)
     with pytest.raises(TypeError):
         ScoringEngine(rules, config.model_dump(), verify_frozen_rules=lambda d: True)
+
+
+# ---------- Rule boundary: unvalidated, subclassed and mutated rules ----------
+
+def unvalidated(model, **update):
+    return model.model_copy(update=update)  # skips validation, like model_construct()
+
+
+def invalid_rule_sets():
+    valid = synthetic_rules()
+    energy, tammann = valid.features
+    return {
+        "undefined term feature": unvalidated(valid, p_react=unvalidated(
+            valid.p_react, terms=(Term(feature="nope", weight=1.0),))),
+        "unknown link": unvalidated(valid, p_react=unvalidated(valid.p_react, link="probit")),
+        "bool weight": unvalidated(valid, p_react=unvalidated(
+            valid.p_react, terms=(Term.model_construct(feature="energy", weight=True),))),
+        "string threshold": unvalidated(valid, category_rules=(CategoryRule.model_construct(
+            when=(Condition.model_construct(subject="p_react", op="ge", threshold="0.9"),), outcome=HIGH),)),
+        "NaN fallback": unvalidated(valid, features=(energy, unvalidated(tammann, fallback=float("nan")))),
+        "unknown on_multiple": unvalidated(valid, features=(energy, unvalidated(tammann, on_multiple="mean"))),
+        "duplicate feature": unvalidated(valid, features=(energy, energy)),
+        "list instead of tuple": unvalidated(valid, category_rules=list(valid.category_rules)),
+        "extra field": unvalidated(valid, note="synthetic"),
+        "missing field": ScoringRules.model_construct(
+            **{name: getattr(valid, name) for name in ScoringRules.model_fields if name != "otherwise"}),
+    }
+
+
+@pytest.mark.parametrize("name", sorted(invalid_rule_sets()))
+def test_unvalidated_rules_are_refused_before_the_verifier(name):
+    calls = []
+    config = RunConfig(run_id="run", condition="C1", seed=0, model="synthetic-model")
+    with pytest.raises(ScoringConfigurationError, match="failed validation"):
+        ScoringEngine(invalid_rule_sets()[name], config, verify_frozen_rules=lambda d: calls.append(d) or True)
+    assert calls == []
+
+
+def test_a_subclass_cannot_supply_its_own_digest():
+    valid = synthetic_rules()
+    fields = {name: getattr(valid, name) for name in ScoringRules.model_fields}
+
+    class Forged(ScoringRules):
+        def digest(self) -> str:
+            return valid.digest()
+
+    forged = Forged.model_validate(fields | {"p_react": LinearScore(intercept=-50.0, link="logistic",
+                                                                    terms=valid.p_react.terms)})
+    config = RunConfig(run_id="run", condition="C1", seed=0, model="synthetic-model")
+    seen = []
+    with pytest.raises(ScoringConfigurationError, match="not been verified"):
+        ScoringEngine(forged, config, verify_frozen_rules=lambda d: seen.append(d) or d == valid.digest())
+    assert seen == [ScoringRules.model_validate(forged).digest()] and seen[0] != valid.digest()
+    # A subclass with the attested content runs as the plain rule set.
+    engine = ScoringEngine(Forged.model_validate(fields), config,
+                           verify_frozen_rules=lambda d: d == valid.digest())
+    assert type(engine.rules) is ScoringRules and engine.rules == valid
+
+
+def test_engine_keeps_a_private_snapshot_of_the_attested_rules(item, evidence):
+    rules = synthetic_rules()
+    engine = engine_for(rules)
+    requests = [make_request(1)]
+    before = (engine.provisional(item, evidence),
+              engine.score(item, evidence, requests, [], cost=cost_for(requests)).model_dump_json())
+    # Frozen models refuse assignment, but object.__setattr__ gets past that.
+    object.__setattr__(rules.p_react, "intercept", -50.0)
+    object.__setattr__(rules, "category_rules", ())
+    exposed = engine.rules
+    object.__setattr__(exposed.p_react, "intercept", 50.0)
+    assert (engine.provisional(item, evidence),
+            engine.score(item, evidence, requests, [], cost=cost_for(requests)).model_dump_json()) == before
+    assert engine.rules_digest == synthetic_rules().digest() and engine.rules == synthetic_rules()
+    assert engine.rules is not engine.rules
+
+
+def legacy_digest(rules):
+    # ScoringRules.digest() as it was before rules were validated again.
+    canonical = json.dumps(rules.model_dump(mode="json"), sort_keys=True,
+                           separators=(",", ":"), ensure_ascii=True, allow_nan=False)
+    return hashlib.sha256(canonical.encode("ascii")).hexdigest()
+
+
+EDGE_NUMBERS = (-0.0, 0.0, 5e-324, -5e-324, 1e-300, 0.1, 1, 1.7976931348623157e308, -1.7976931348623157e308)
+
+
+def random_rules(rng):
+    def number():
+        return rng.choice(EDGE_NUMBERS) if rng.random() < 0.5 else rng.uniform(-1e3, 1e3)
+    energy, tammann = synthetic_rules().features
+    tammann = Feature(name="tammann", sources=tammann.sources, fallback=rng.choice((None, number())),
+                      on_multiple=rng.choice(("require_equal", "latest_created")))
+    terms = (Term(feature="energy", weight=number()), Term(feature="tammann", weight=number()))
+    when = tuple(Condition(subject=rng.choice(("p_react", "energy", "tammann")),
+                           op=rng.choice(("lt", "le", "gt", "ge")), threshold=number())
+                 for _ in range(rng.randint(1, 3)))
+    reasons = tuple(rng.sample(list(ReviewReason), rng.randint(0, len(ReviewReason))))
+    return ScoringRules(
+        features=(energy, tammann),
+        p_react=LinearScore(intercept=number(), link=rng.choice(("logistic", "clip")),
+                            terms=terms[:rng.randint(0, 2)]),
+        category_rules=tuple(CategoryRule(when=when, outcome=rng.choice((HIGH, MID, LOW)))
+                             for _ in range(rng.randint(0, 2))),
+        otherwise=rng.choice((HIGH, MID, LOW)),
+        disagreement_flag_reasons=reasons,
+        applicability_flag_reasons=tuple(reversed(reasons)),
+    )
+
+
+def test_valid_rule_digests_are_unchanged():
+    # Pinned before the private snapshot was added, so attested digests still hold.
+    assert synthetic_rules().digest() == engine_for(synthetic_rules()).rules_digest \
+        == "192f985a8049a3f036f70398bc4793d7041fb37e2512e71efa820cdc3ca8c688"
+    config = RunConfig(run_id="run", condition="C1", seed=0, model="synthetic-model")
+    rng = random.Random(20261031)
+    for _ in range(500):
+        rules = random_rules(rng)
+        engine = ScoringEngine(rules, config, verify_frozen_rules=lambda d: True)
+        assert engine.rules_digest == rules.digest() == legacy_digest(rules)
+        assert engine.rules == rules
 
 
 def test_provisional_applies_configured_logistic_score(item, evidence):

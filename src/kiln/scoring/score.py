@@ -170,6 +170,12 @@ class ScoringEngine:
     ``verify_frozen_rules`` receives the rules' SHA-256 digest and must return
     the literal True; otherwise, or if it raises, construction fails. The
     engine never decides that rules are frozen.
+
+    The rules are validated again into a private plain ``ScoringRules`` before
+    the digest is computed, so unvalidated instances (``model_construct``,
+    ``model_copy(update=...)``) are refused before the verifier is called, a
+    subclass cannot supply its own digest, and later changes to the caller's
+    object cannot alter the attested rules. ``rules`` returns a copy.
     """
 
     def __init__(
@@ -184,7 +190,11 @@ class ScoringEngine:
         if not isinstance(config, RunConfig):
             raise TypeError("config must be a RunConfig")
         config = RunConfig.model_validate(config.model_dump())
-        digest = rules.digest()
+        try:
+            rules = ScoringRules.model_validate(rules)
+        except Exception as exc:
+            raise ScoringConfigurationError("Scoring rules failed validation") from exc
+        digest = ScoringRules.digest(rules)
         try:
             attested = verify_frozen_rules is not None and verify_frozen_rules(digest) is True
         except Exception as exc:
@@ -199,7 +209,8 @@ class ScoringEngine:
 
     @property
     def rules(self) -> ScoringRules:
-        return self._rules
+        """A copy of the attested rules; the engine's own snapshot stays private."""
+        return self._rules.model_copy(deep=True)
 
     @property
     def rules_digest(self) -> str:
