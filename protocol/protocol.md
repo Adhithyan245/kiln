@@ -227,7 +227,13 @@ This draft has not been hashed, posted or frozen.
 3. Agents see only the `Item`. A test in PR #6 checks that no `Item` holds a label field.
 4. `data/precursor_props.csv` holds the properties of one precursor at a time, never whether two precursors react (`prompts/annamayya.md`).
 5. Team members and their assistants never look up experimental outcomes online (rule 2).
-6. Held-out precursors are never used to set a threshold, price, rule, escalation margin or B1 feature. All of these are frozen on development data before Gate P.
+6. Held-out pairs are never used to set a threshold, price, rule, escalation margin or B1 feature: not their outcomes and not any run on them. Sources:
+   - the experiment is split by precursor (`AGENTS.md` project summary; `prompts/hemanath.md` Task 1);
+   - baselines report development metrics only (`prompts/hemanath.md` Task 2);
+   - B1 rejects any row whose split is not `dev` (PR #9);
+   - held-out runs start only after Gate P (§10, P4).
+
+   Whether any of these values may be set from development **labels**, and how, depends on **OPEN-10**. Until it closes, no value is set from development outcomes (§12).
 7. B0, B0-T and B1 use no LLM and serve as LLM-free reference points.
 
 **Residual risk.** A-Lab outcomes and the Precursor Genome (published 2026-07-09) are public, so LLM pretraining may include them. Because LLMs cannot set numbers, recall could act only through which evidence an agent buys and through text fields (rationale, claims, cause and fix). Whether such text can influence `category` depends on the scoring rules (**OPEN-05**).
