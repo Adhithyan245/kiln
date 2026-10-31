@@ -1,0 +1,45 @@
+# Night 1: Materials Project cache, ALCHEMI known-answer test, relaxation pre-warm.
+# Run on the GPU host inside tmux:  python -m kiln.night run src/kiln/night/plans/night1.toml
+# Every step is idempotent: it skips work whose cached output already exists.
+
+name = "night1"
+labels_must_be_absent = true   # no step here needs labels; refuse to run next to them
+heartbeat_s = 1800
+cap_check_s = 60
+stop_grace_s = 120
+
+[caps]
+# TODO-owner-CJ: set from profiling before the first real run (protocol OPEN-02).
+# The runner refuses to start (except --dry-run) until all three are set.
+# max_tokens = 0
+# max_usd = 0.0
+# max_gpu_hours = 0.0
+
+[retry]
+base_s = 30
+factor = 2
+jitter = 0.25
+max_delay_s = 900
+
+[[steps]]
+name = "mp_fetch"
+cmd = ["python", "-m", "kiln.tools.mp", "fetch", "--all-pairs"]
+env = ["MP_API_KEY"]
+timeout_s = 7200
+retries = 3
+note = "Materials Project phases for every pair's chemical system; resumable per chemsys."
+
+[[steps]]
+name = "known_answer"
+cmd = ["bash", "env/gb10/known_answer.sh"]
+timeout_s = 900
+retries = 1
+note = "alchemi-mlip-test.py mace_si must give -5.41238 eV/atom; nothing relaxes until it passes."
+
+[[steps]]
+name = "relax_prewarm"
+cmd = ["python", "-m", "kiln.compute.profile", "--prewarm"]
+depends_on = ["mp_fetch", "known_answer"]
+timeout_s = 28800
+retries = 2
+note = "Charged through compute.client under its own prewarm budget and log (AGENTS.md rule 8)."
