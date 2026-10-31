@@ -19,7 +19,7 @@ Models live in `src/kiln/schemas.py`; owners are in `AGENTS.md`. **Build the 11 
    Health check: `kiln.compute.client.healthy() -> bool`. Same API on the GB10 and the Brev backup.
 5. **Annamayya** specialists subclass `kiln.agents.base.Agent` (CJ) and implement `step(item, board, budget)`:
    - **Thermo:** starts with `cached_lookup`; escalates to `single_point` or `bounded_relaxation` only by its escalation rule; answers `firm_up_energy` and `reaction_energy` needs.
-   - **Kinetics:** `kiln.tools.tammann.tammann_c(...)` for both precursors; posts `firm_up_energy` when the driving force is borderline.
+   - **Kinetics:** uses each precursor's `melting_point_c` from `kiln.tools.precursors.props(...)` with `kiln.tools.tammann.tammann_c(...)`; retains its source and semantics alongside the result; posts `firm_up_energy` when the driving force is borderline.
    - **Precursor:** `kiln.tools.precursors.props(formula)` from `data/precursor_props.csv`; when a precursor breaks down below the furnace temperature, requests `decomposition_reeval`.
    Every claim has `falsified_if`; every artifact lists the `compute_requests` it used.
 6. **CJ** comparators: `agents/single.py` (C1: one agent, all tools and tiers) and `agents/planner.py` (C3: decides which specialist runs and which compute to buy), same budget.
@@ -38,7 +38,9 @@ Models live in `src/kiln/schemas.py`; owners are in `AGENTS.md`. **Build the 11 
 | `reaction_energy` | Precursor, Kinetics | Thermo | `{"species": ["CaO", "TiO2"]}` |
 
 ## Value keys (units in the name)
-`dE_ev_per_atom`, `dE_mlip_minus_mp_ev_per_atom`, `tammann_a_c`, `tammann_b_c`, `decomposes_at_c`, `decomposition_product`, `volatile_above_c`.
+`dE_ev_per_atom`, `dE_mlip_minus_mp_ev_per_atom`, `tammann_a_c`, `tammann_b_c`, `decomposes_at_c`, `decomposition_product`, `volatile_above_c`, `melting_point_c`, `melting_point_source`, `melting_point_source_url`, `melting_point_semantics`, `melting_point_semantics_source`, `melting_point_semantics_note`.
+
+`melting_point_semantics` is `as_reported` or `possible_decomposition_or_dehydration`. The second value is a narrow caution for precursor temperatures that could represent decomposition or dehydration in place of melting. It does not remove or replace the dataset's reported temperature. Other value disagreements and phase-form issues are not tagged by this field.
 
 ## Run folders
 `runs/<run_id>/config.json`, `board/`, `compute_requests.jsonl`, `predictions.jsonl`, `prediction.sha256`, `cost.json`, `verifier.log`.

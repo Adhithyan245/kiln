@@ -90,7 +90,7 @@ Inside `client.request` the order is fixed: **charge (raises `BudgetExceeded`) �
 | Module | Responsibility | Public API |
 |---|---|---|
 | `kiln.tools.tammann` | ⅔·T_m in kelvin, returned in °C | `tammann_c(melting_point_c: float) -> float` |
-| `kiln.tools.precursors` | Lookups into the cited precursor table | `props(formula: str) -> PrecursorProps` (unknowns explicit) |
+| `kiln.tools.precursors` | Lookups into the cited precursor table, including the published temperature and its provenance | `props(formula: str) -> PrecursorProps` (unknowns explicit; returns `melting_point_c`, its Table 1 source citation and URL, and `melting_point_semantics`) |
 | `kiln.agents.thermo` / `kinetics` / `precursor` | Specialists. The LLM picks actions; numbers come from tools | `class Thermo(Agent): def step(self, item, board, budget) -> list[Artifact \| Need]` (the same for each) |
 | `kiln.review` | Review flags and disagreement text | `flags(item, accepted, requests) -> list[ReviewFlag]` · `disagreements(accepted) -> list[str]` |
 
@@ -105,6 +105,8 @@ Inside `client.request` the order is fixed: **charge (raises `BudgetExceeded`) �
 | `app/` | Kiln Triage (Streamlit), reading `runs/` and `results/` only | — |
 
 The LLM never sees a tool that returns a number it can then write into `values`. Agents fill `values` only by copying tool outputs **in code**. The verifier re-checks each number against the cited `ComputeRequest.result` or tool output (rule 7).
+
+The precursor table preserves all 46 melting-point values and source attributions as published in the Precursor Genome's Table 1. `melting_point_semantics` only marks possible decomposition or dehydration temperatures used in place of a melting point; it is a caution and does not discard the value. Numeric source disagreements and phase-form mismatches are outside this flag. The dataset authors describe this approximation in §2.2 ([source](https://arxiv.org/pdf/2607.09903)).
 
 ---
 
