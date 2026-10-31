@@ -276,15 +276,100 @@ def test_cumulative_request_charges_cannot_exceed_reported_cost():
     assert status == VerifierStatus.rejected
 
 
-@pytest.mark.parametrize("cost", [Cost(tool_calls=13), Cost(tokens_in=20000, tokens_out=20001),
-                                 Cost(compute_units=10.1)])
-def test_cumulative_item_limits_are_enforced(cost):
-    assert check(artifact(values={}), cost=cost)[0] == VerifierStatus.rejected
+@pytest.mark.parametrize(("cost", "note"), [
+    (Cost(tool_calls=13), "Tool-call budget exceeded"),
+    (Cost(tokens_in=20000, tokens_out=20001), "Token budget exceeded"),
+    (Cost(compute_units=10.1), "Compute budget exceeded"),
+])
+def test_cumulative_item_limits_are_enforced(cost, note):
+    # The log matches the item's compute units, so only the limit is broken.
+    log = [request(compute_units=cost.compute_units)] if cost.compute_units else []
+    status, notes = check(artifact(values={}), log, cost)
+    assert (status, notes) == (VerifierStatus.rejected, note)
 
 
 def test_budget_limit_is_inclusive():
     cost = Cost(tool_calls=12, tokens_in=40000, compute_units=10)
-    assert check(artifact(values={}), cost=cost)[0] == VerifierStatus.accepted
+    log = [request(compute_units=10)]
+    assert check(artifact(values={}), log, cost) == (VerifierStatus.accepted, "Checks passed")
+
+
+def thermo_log():
+    # A cached lookup and a relaxation that did not converge; both are charged.
+    return [request(tier="cached_lookup", status="cached", compute_units=1.0),
+            request(request_id="request-2", tier="bounded_relaxation", status="not_converged",
+                    result={}, compute_units=3.0, gpu_seconds=12.5)]
+
+
+def thermo_artifact(**changes):
+    data = dict(compute_requests=["request-1", "request-2"], claims=[claim()],
+                cost=Cost(compute_units=4.0))
+    data.update(changes)
+    return artifact(**data)
+
+
+def test_item_compute_cost_equal_to_log_total_is_accepted():
+    status, notes = check(thermo_artifact(), thermo_log(), Cost(compute_units=4.0))
+    assert (status, notes) == (VerifierStatus.accepted, "Checks passed")
+
+
+@pytest.mark.parametrize("item_units", [5.0, 4.01])
+def test_unlogged_item_compute_charge_is_rejected(item_units):
+    # Charges with no logged request: e.g. a request missing from the log.
+    status, notes = check(thermo_artifact(), thermo_log(), Cost(compute_units=item_units))
+    assert (status, notes) == (VerifierStatus.rejected,
+                               "Cumulative item compute cost exceeds compute log charges")
+
+
+def test_request_missing_from_log_is_rejected():
+    status, notes = check(thermo_artifact(), thermo_log()[:1], Cost(compute_units=4.0))
+    assert status == VerifierStatus.rejected
+    assert "Unknown compute request: request-2" in notes
+    assert "Cumulative item compute cost exceeds compute log charges" in notes
+
+
+def test_shared_cited_request_is_charged_once_in_item_cost():
+    first = thermo_artifact(verifier=VerifierStatus.accepted)
+    second = artifact(artifact_id="run:thermo:2", cites=[first.artifact_id],
+                      compute_requests=["request-1"], claims=[claim()],
+                      cost=Cost(compute_units=1.0))
+    board = FakeBoard([first])
+    # The item cost is the log total, not the sum of artifact costs.
+    assert check(second, thermo_log(), Cost(compute_units=4.0), board=board) == (
+        VerifierStatus.accepted, "Checks passed")
+    status, notes = check(second, thermo_log(), Cost(compute_units=5.0), board=board)
+    assert (status, notes) == (VerifierStatus.rejected,
+                               "Cumulative item compute cost exceeds compute log charges")
+
+
+@pytest.mark.parametrize(("item_units", "note"), [
+    (4.0, None),
+    (1.0, "Compute request charges exceed cumulative item cost"),  # failed charge dropped
+    (3.0, "Compute request charges exceed cumulative item cost"),  # cache hit not charged
+])
+def test_uncited_cached_and_failed_requests_count_towards_item_cost(item_units, note):
+    status, notes = check(kinetics(), thermo_log(), Cost(compute_units=item_units),
+                          tool_values={"tammann_a_c": 600.5, "tammann_b_c": 720.0})
+    if note is None:
+        assert (status, notes) == (VerifierStatus.accepted, "Checks passed")
+    else:
+        assert (status, notes) == (VerifierStatus.rejected, note)
+
+
+def test_tool_calls_and_tokens_are_not_compared_with_compute_log():
+    target = thermo_artifact(cost=Cost(tool_calls=2, tokens_in=300, tokens_out=50,
+                                       compute_units=4.0))
+    item = Cost(tool_calls=9, tokens_in=5000, tokens_out=800, compute_units=4.0)
+    assert check(target, thermo_log(), item) == (VerifierStatus.accepted, "Checks passed")
+
+
+@pytest.mark.parametrize("name", ["tool_calls", "tokens_in", "tokens_out"])
+def test_artifact_tool_or_token_cost_cannot_exceed_item_cost(name):
+    target = thermo_artifact(cost=Cost(compute_units=4.0, **{name: 5}))
+    item = Cost(compute_units=4.0, **{name: 4})
+    status, notes = check(target, thermo_log(), item)
+    assert (status, notes) == (VerifierStatus.rejected,
+                               f"Artifact cost exceeds cumulative item cost: {name}")
 
 
 def rounded_charges():
@@ -309,11 +394,15 @@ def test_float_rounding_in_charges_is_not_a_budget_violation():
 
 
 def test_float_rounding_at_compute_limit_is_not_a_budget_violation():
-    _, own, _ = rounded_charges()
-    status, _ = verify(artifact(values={}), FakeBoard(), requests=[],
-                       config=config(max_compute_units_per_item=0.6),
-                       item_cost=Cost(compute_units=own), tool_values=None)
-    assert status == VerifierStatus.accepted
+    # The agent's running sum sits a rounding error above both the log total and the limit.
+    charges, own, _ = rounded_charges()
+    assert own > math.fsum(charges) and own > 0.6
+    requests = [request(request_id=f"request-{n}", compute_units=charge)
+                for n, charge in enumerate(charges, 1)]
+    status, notes = verify(artifact(values={}), FakeBoard(), requests=requests,
+                           config=config(max_compute_units_per_item=0.6),
+                           item_cost=Cost(compute_units=own), tool_values=None)
+    assert (status, notes) == (VerifierStatus.accepted, "Checks passed")
 
 
 def test_real_cost_excess_is_still_rejected():
@@ -323,6 +412,10 @@ def test_real_cost_excess_is_still_rejected():
     assert status == VerifierStatus.rejected
     assert "Artifact cost exceeds cumulative item cost: compute_units" in notes
     assert "Compute request charges exceed cumulative item cost" in notes
+    status, notes = check(artifact(values={}), [request(compute_units=0.6)],
+                          Cost(compute_units=0.61))
+    assert (status, notes) == (VerifierStatus.rejected,
+                               "Cumulative item compute cost exceeds compute log charges")
 
 
 @pytest.mark.parametrize("key", ["category", "reacted", "xrd_patterns", "refinement_results",

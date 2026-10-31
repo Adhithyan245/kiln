@@ -58,6 +58,11 @@ def verify(
 
     ``requests`` must be the complete compute log for this run and item, and
     ``item_cost`` the cumulative cost for the item, including this artifact.
+    Every compute request, cached or failed included, is charged at its tier
+    price and logged (AGENTS.md rules 8 and 9), so ``item_cost.compute_units``
+    must equal the log total within float tolerance; read both while no
+    request for the item is in flight. Tool calls and tokens are not in the
+    log and are checked only against the artifact's own cost and the limits.
     ``tool_values`` holds the deterministic tool outputs for the item,
     recomputed by the caller (``tammann_a_c``/``tammann_b_c`` for precursors a
     and b, ``decomposes_at_c``, ``volatile_above_c``); it must never be copied
@@ -184,6 +189,8 @@ def verify(
                 errors.append("Invalid compute request cost")
             elif _exceeds(math.fsum(units), item_cost.compute_units):
                 errors.append("Compute request charges exceed cumulative item cost")
+            elif _exceeds(item_cost.compute_units, math.fsum(units)):
+                errors.append("Cumulative item compute cost exceeds compute log charges")
 
     if errors:
         return VerifierStatus.rejected, "; ".join(errors)
