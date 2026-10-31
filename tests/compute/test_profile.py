@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import random
 from pathlib import Path
 
@@ -71,6 +72,39 @@ def test_items_file_gives_the_same_seeded_sample_as_the_ledger(tmp_path: Path, m
     assert main(["--export-items", str(path)]) == 0
     sample = lambda items: [i.item_id for i in random.Random(0).sample(items, 20)]  # noqa: E731
     assert sample(_items("dev", path)) == sample(_items("dev"))
+
+
+def _fake_ledger(path: Path) -> Path:
+    # Made-up ledger: ten oxides paired with TiO2, two samples with no heating temperature, and a
+    # stand-in label field that must never reach the items file.
+    oxides = ["CaO", "MgO", "BaO", "SrO", "ZnO", "NiO", "CoO", "CuO", "FeO", "MnO"]
+    samples = [{"sample_id": f"S{n}", "precursors": [{"formula": ox}, {"formula": "TiO2"}],
+                "synthesis": {"heating_temperature": 900 + n}, "xrd_label": "SECRET"} for n, ox in enumerate(oxides)]
+    samples[3]["synthesis"] = {"heating_temperature": None}
+    samples[7]["synthesis"] = None
+    path.write_text(json.dumps({"samples": samples}), encoding="utf-8")
+    return path
+
+
+def test_skip_missing_temperature_exports_only_complete_items(tmp_path: Path, monkeypatch, capsys) -> None:
+    ledger = _fake_ledger(tmp_path / "ledger.json")
+    monkeypatch.setattr("kiln.data.DEFAULT_LEDGER", ledger)
+    out = tmp_path / "items.jsonl"
+    assert main(["--export-items", str(out), "--skip-missing-temperature"]) == 0
+    printed = capsys.readouterr().out
+    assert "left out 2 samples" in printed and "S3" not in printed and "S7" not in printed
+    items = read_items_file(out)
+    assert sorted(i.item_id for i in items) == sorted(f"S{n}" for n in range(10) if n not in (3, 7))
+    assert "SECRET" not in out.read_text(encoding="utf-8")
+
+
+def test_export_without_the_flag_still_fails_on_a_missing_temperature(tmp_path: Path, monkeypatch) -> None:
+    from kiln.data import LedgerRecordError, load_items
+
+    ledger = _fake_ledger(tmp_path / "ledger.json")
+    monkeypatch.setattr("kiln.data.load_items", lambda split: load_items(split, ledger))
+    with pytest.raises(LedgerRecordError):
+        main(["--export-items", str(tmp_path / "items.jsonl")])
 
 
 def test_bundled_settings_load_and_satisfy_the_client(tmp_path: Path) -> None:

@@ -42,7 +42,7 @@ python -m kiln.compute.profile --items-file ~/kiln-items.jsonl --pairs 20 --seed
 python -m kiln.compute.profiling --summary results/gb10/profile_s0.json --hours 11 --workers 1 --out protocol/prices_proposal.json
 ```
 
-- The ledger is not on the GB10, and must not be copied there: it holds the locked labels. Whoever has the ledger makes the items file (agent-visible fields only: formulas, temperatures, split) with `python -m kiln.compute.profile --export-items kiln-items.jsonl` and copies it to `~/kiln-items.jsonl` on the GB10, outside the repo. It keeps the ledger's order, so `--seed 0` picks the same 20 pairs as a run against the ledger.
+- The ledger is not on the GB10, and must not be copied there: it holds the locked labels. Whoever has the ledger makes the items file (agent-visible fields only: formulas, temperatures, split) with `python -m kiln.compute.profile --export-items kiln-items.jsonl --skip-missing-temperature` (the 54 samples with no heating temperature, OPEN-13, would stop the strict ingest; the flag leaves them out and prints only the count, and does not decide OPEN-13) and copies it to `~/kiln-items.jsonl` on the GB10, outside the repo. It keeps the ledger's order, so `--seed 0` picks the same 20 pairs as a run against the ledger.
 - `--hours 11` is 7:30 PM to about 6:30 AM. Change `--workers` to the number of GPU workers Night 2 will really have (GB10 plus Brev).
 
 **Expect:** per-tier median and p90 GPU-seconds, then the proposed prices, per-pair budget and whether the main run (and a second budget level) fits Night 2.

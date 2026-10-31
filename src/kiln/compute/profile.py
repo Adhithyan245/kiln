@@ -11,7 +11,7 @@ Profiling and pre-warm runs are tagged condition "N1" until the protocol names t
     python -m kiln.compute.profile --prewarm                     # every dev + held-out pair
 
 A GPU host without the ledger reads the same items from a file made where the ledger is:
-    python -m kiln.compute.profile --export-items items.jsonl    # on a machine with the ledger
+    python -m kiln.compute.profile --export-items items.jsonl --skip-missing-temperature  # ledger machine
     python -m kiln.compute.profile --items-file items.jsonl --pairs 20 --seed 0
 """
 from __future__ import annotations
@@ -22,6 +22,7 @@ import platform
 import random
 import statistics
 import sys
+import tempfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -104,6 +105,32 @@ def read_items_file(path: Path) -> list[Item]:
             if line.strip()]
 
 
+def complete_items(ledger: Path) -> tuple[list[Item], int]:
+    """Items from the ledger without the samples that have no heating temperature, and how many
+    were left out. Only the agent-visible fields are decoded (kiln.data's projection); the strict
+    ingest then runs unchanged on the rest, so the held-out split is drawn from the remaining
+    samples. For profiling only: it does not decide OPEN-13."""
+    from kiln.data import _SELECTION, LedgerError, _ProjectionReader, ingest
+
+    with Path(ledger).open(encoding="utf-8") as stream:
+        projected = _ProjectionReader(stream).value(_SELECTION)
+    samples = projected.get("samples") if isinstance(projected, dict) else None
+    if not isinstance(samples, list):
+        raise LedgerError("Ledger must contain a samples array")
+    def no_temperature(sample: Any) -> bool:  # anything else malformed stays in and fails the strict ingest
+        if not isinstance(sample, dict):
+            return False
+        synthesis = sample.get("synthesis")
+        return synthesis is None or (isinstance(synthesis, dict) and synthesis.get("heating_temperature") is None)
+
+    keep = [s for s in samples if not no_temperature(s)]
+    with tempfile.TemporaryDirectory() as tmp:  # projected fields only, deleted on exit
+        path = Path(tmp) / "projected.json"
+        path.write_text(json.dumps({"samples": keep}), encoding="utf-8")
+        items, _ = ingest(path)
+    return items, len(samples) - len(keep)
+
+
 def _items(split: str, items_file: Path | None = None) -> list[Item]:
     if items_file is not None:  # same order as the ledger, so --seed picks the same sample
         return [item for item in read_items_file(items_file) if item.split == split]
@@ -127,10 +154,20 @@ def main(argv: list[str] | None = None) -> int:
                         help="agent-visible items (JSON Lines) instead of the ledger, for the GPU host")
     parser.add_argument("--export-items", type=Path, metavar="PATH",
                         help="write the dev and held-out items from the ledger to PATH and exit")
+    parser.add_argument("--skip-missing-temperature", action="store_true",
+                        help="with --export-items: leave out samples with no heating temperature and print only "
+                             "how many. For profiling; it does not decide OPEN-13")
     args = parser.parse_args(argv)
 
     if args.export_items:
-        items = _items("dev") + _items("heldout")
+        if args.skip_missing_temperature:
+            from kiln.data import DEFAULT_LEDGER
+
+            complete, skipped = complete_items(DEFAULT_LEDGER)
+            items = [i for i in complete if i.split == "dev"] + [i for i in complete if i.split == "heldout"]
+            print(f"left out {skipped} samples with no heating temperature (OPEN-13 undecided; for profiling only)")
+        else:
+            items = _items("dev") + _items("heldout")
         write_items_file(args.export_items, items)
         print(f"wrote {len(items)} agent-visible items to {args.export_items}")
         return 0
