@@ -22,15 +22,16 @@ Kiln is an auditable, budget-aware triage system for solid-state reactions. Spec
 - **One complete example first.** Until the 11 AM Saturday vertical slice works (one development pair through agents → GB10 request → verifier → score → evidence card), prefer wiring things together over adding features.
 - Read `docs/interfaces.md`. All data passed between modules uses `src/kiln/schemas.py`. Don't add fields without a commit that updates both files.
 - Only edit files in **your own folders** (below). If you need a change elsewhere, ask the owner.
+- **Sharing the GB10:** one job at a time; experiment runs (Night 2) take priority over profiling and benchmarks. Check `nvidia-smi` and the team queue before starting a GPU job.
 - Start each task by writing a short plan and waiting for the human's OK.
 
 ## Ownership
 | Folder / file | Owner |
 |---|---|
 | `src/kiln/data/`, `src/kiln/provenance/`, `src/kiln/verifier/`, `src/kiln/scoring/`, `src/kiln/baselines/`, `data/alab/`, `protocol/` | Hemanath (A — Evaluation) |
-| `src/kiln/compute/` (service, tiers, convergence, accounting), `src/kiln/tools/mp.py`, `src/kiln/night/`, `env/gb10/`, `cache/` | CJ (B — Compute) |
-| `src/kiln/agents/thermo.py`, `src/kiln/agents/kinetics.py`, `src/kiln/agents/precursor.py`, `src/kiln/tools/tammann.py`, `src/kiln/tools/precursors.py`, `src/kiln/review/`, `data/precursor_props.csv` | Annamayya (C — Chemistry) |
-| `src/kiln/board/`, `src/kiln/agents/base.py`, `src/kiln/agents/single.py`, `src/kiln/agents/planner.py`, `src/kiln/runners/`, `src/kiln/budget.py`, `app/` | Adhi (D — Integration & Product) |
+| `src/kiln/compute/service.py`, `src/kiln/compute/client.py` (routing, caching, request log, health check), `src/kiln/tools/mp.py`, `src/kiln/board/`, `src/kiln/agents/base.py`, `src/kiln/agents/single.py`, `src/kiln/agents/planner.py`, `src/kiln/runners/`, `src/kiln/night/`, `env/gb10/`, `cache/` | CJ (B — Infrastructure & Integration) |
+| `src/kiln/agents/thermo.py`, `src/kiln/agents/kinetics.py`, `src/kiln/agents/precursor.py`, `src/kiln/tools/tammann.py`, `src/kiln/tools/precursors.py`, `src/kiln/review/`, `data/precursor_props.csv`, `app/` | Annamayya (C — Chemistry & Product) |
+| `src/kiln/compute/tiers.py` (single point, bounded relaxation), `src/kiln/compute/convergence.py`, `src/kiln/compute/energy_reference.py`, `src/kiln/compute/decomposition.py`, `src/kiln/budget.py`, `src/kiln/compute/profiling.py`, `src/kiln/compute/accounting.py` | Adhi (D — Compute Science) |
 | `src/kiln/schemas.py`, `docs/interfaces.md`, `AGENTS.md` | Shared: change only after telling the team |
 
 ## Conventions

@@ -17,3 +17,6 @@ B0 (driving-force threshold on cached energies) and B0-T (Tammann rule). Report 
 
 ## Task 4 (Saturday afternoon): locked scorer and protocol
 `score.score` (fixed rules, takes review flags), B1, and `kiln.scoring.evaluate`: hash → post hash → load labels → metrics on **all** pairs, coverage, flagged vs unflagged accuracy, compute-allocation tables, `moved_toward_label`. Write `protocol/protocol.md` (including the frozen price list and budget) and hash it at 7 PM.
+
+## Task 5 (Sunday by 12:30 PM): public-repo checklist
+Run the checklist in Section 10 of the plan (secret scan of the full history, every result traceable to `runs/`, fresh-clone test, data citations and license, demo link, license file). Then tell Adhi, who flips the repo to public as admin.
