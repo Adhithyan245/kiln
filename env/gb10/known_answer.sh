@@ -5,7 +5,7 @@
 #   bash env/gb10/known_answer.sh
 set -euo pipefail
 
-KIT_DIR="${KIT_DIR:-$HOME/kit}"
+KIT_DIR="${KIT_DIR:-$HOME/science-kits-for-agents/kit}"
 VENV="${VENV:-$HOME/alchemi/venv}"
 EXPECTED="-5.41238"
 TOL="0.0001"
