@@ -276,6 +276,6 @@ def test_relaxation_tier_reports_worst_phase_mlip_minus_mp(cache_dir: Path) -> N
     assert out.result["max_abs_phase_mlip_minus_mp_ev_per_atom"] == pytest.approx(0.03)
 
 
-def test_unbuilt_backend_is_refused_loudly(cache_dir: Path) -> None:
+def test_unknown_backend_is_refused_loudly(cache_dir: Path) -> None:
     with pytest.raises(NotImplementedError):
-        single_point(_structures(cache_dir), {**MLIP, "backend": "nvalchemi"}, calculator_factory=factory(FakeMLIP()))
+        single_point(_structures(cache_dir), {**MLIP, "backend": "nope"}, calculator_factory=factory(FakeMLIP()))
