@@ -5,7 +5,25 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 
+from pymatgen.core import Composition
+
 from kiln.schemas import Artifact, ComputeRequest, ComputeStatus, Item, ReviewFlag, ReviewReason, VerifierStatus
+
+# PROPOSAL (not approved): an unknown decomposition temperature matters only for a precursor that can
+# break down on heating. Anything with H, C or N can (carbonates, hydroxides, oxalates, hydrates, ammonium
+# and acid phosphates); so can these oxides, which lose oxygen to a lower oxide. Other oxides are not flagged.
+OXYGEN_RELEASING_OXIDES = frozenset({"MnO2", "Mn2O3", "Fe2O3", "Co3O4", "CuO", "BaO2", "Ag2O", "PbO2"})
+
+
+def can_decompose(formula: str) -> bool:
+    """True when an unknown decomposition temperature for this precursor counts as missing evidence."""
+    try:
+        comp = Composition(formula)
+    except Exception:
+        return True   # unparseable: never assume it is stable
+    if any(str(e) in ("H", "C", "N") for e in comp.elements):
+        return True
+    return comp.reduced_formula in OXYGEN_RELEASING_OXIDES or formula in OXYGEN_RELEASING_OXIDES
 
 
 def flags(item: Item, accepted: Sequence[Artifact], requests: Sequence[ComputeRequest], *,
@@ -22,8 +40,11 @@ def flags(item: Item, accepted: Sequence[Artifact], requests: Sequence[ComputeRe
     if not has_kinetics or not has_thermo:
         result.append(ReviewFlag(reason=ReviewReason.missing_evidence, detail="Accepted kinetics or thermodynamic evidence is missing."))
     precursor_reports = [a for a in usable if a.agent == "precursor" and a.fulfills_need is None]
-    if not precursor_reports or not any(all(a.values.get(f"precursor_{side}_decomposition_known") is True
-                                       for side in ("a", "b")) for a in precursor_reports):
+    def covered(a: Artifact, side: str) -> bool:
+        known = a.values.get(f"precursor_{side}_decomposition_known")
+        formula = a.values.get(f"precursor_{side}_formula") or getattr(item, f"precursor_{side}")
+        return known is True or (known is False and not can_decompose(formula))
+    if not precursor_reports or not any(all(covered(a, side) for side in ("a", "b")) for a in precursor_reports):
         result.append(ReviewFlag(reason=ReviewReason.missing_evidence, detail="A precursor decomposition temperature is unknown."))
     for a in usable:
         if a.values.get("decomposition_conditions_unverified") is True:

@@ -58,7 +58,8 @@ def test_specialists_share_verified_synthetic_evidence(tmp_path):
             board.post_artifact(artifact.model_copy(update={"verifier": status, "verifier_notes": notes}))
         flagged = flags(item, board.accepted_artifacts(item.item_id), requests)
         assert any("decomposition or dehydration" in flag.detail for flag in flagged)
-        assert any("decomposition temperature is unknown" in flag.detail for flag in flagged)
+        # CaCO3's temperature is known and TiO2 is a stable oxide, so nothing is missing (proposal).
+        assert not any("decomposition temperature is unknown" in flag.detail for flag in flagged)
         # This arbitrary configuration exists only to exercise the scorer; it is not the experiment protocol.
         outcome = Outcome(category=Category.unreacted, cause="synthetic", fix="synthetic")
         scoring_rules = ScoringRules(features=(Feature(name="x", sources=(EvidenceSource(agent="thermo",
