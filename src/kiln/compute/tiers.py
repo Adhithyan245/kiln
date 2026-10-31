@@ -324,8 +324,10 @@ def _run_nvalchemi(tier: ComputeTier, items: list[Structure], settings: dict[str
         {"key": "stress", "threshold": s_tol,
          "custom_op": lambda s: s.reshape(s.shape[0], -1).abs().amax(dim=-1) <= s_tol},
     ])
+    # Optional FIRE2 step settings (Toolkit defaults otherwise): dt, fire_tmax, fire_maxstep.
+    fire = {k: float(settings[s]) for k, s in (("tmax", "fire_tmax"), ("maxstep", "fire_maxstep")) if s in settings}
     opt = FIRE2VariableCell(model=model, dt=float(settings.get("dt", 0.1)),
-                            n_steps=int(settings["max_steps"]) if relax else 0, convergence_hook=hook)
+                            n_steps=int(settings["max_steps"]) if relax else 0, convergence_hook=hook, **fire)
     for h in model.make_neighbor_hooks():
         opt.register_hook(h, stage=DynamicsStage.BEFORE_COMPUTE)
     _sync(device)
