@@ -82,6 +82,19 @@ def test_rejects_container_in_selected_optional_field(tmp_path, field, value):
         ingest(path)
 
 
+@pytest.mark.parametrize("synthesis,expected", [
+    (None, "missing synthesis data and heating temperature"),
+    ({"heating_temperature": None}, "missing synthesis.heating_temperature"),
+])
+def test_missing_temperature_fails_closed(tmp_path, synthesis, expected):
+    path = write_ledger(tmp_path)
+    document = json.loads(path.read_text())
+    document["samples"][0]["synthesis"] = synthesis
+    path.write_text(json.dumps(document))
+    with pytest.raises(ValueError, match=expected):
+        ingest(path)
+
+
 def test_rejects_bad_records_and_split(tmp_path):
     path = write_ledger(tmp_path)
     with pytest.raises(ValueError, match="split must"):

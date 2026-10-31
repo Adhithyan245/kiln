@@ -157,8 +157,12 @@ def ingest(path: str | Path = DEFAULT_LEDGER, *, seed: int = SPLIT_SEED) -> tupl
             raise ValueError(f"Sample {index} must be an object")
         precursors = sample.get("precursors")
         synthesis = sample.get("synthesis")
-        if not isinstance(precursors, list) or len(precursors) != 2 or not isinstance(synthesis, dict):
-            raise ValueError(f"Sample {index} requires exactly two precursors and synthesis data")
+        if not isinstance(precursors, list) or len(precursors) != 2:
+            raise ValueError(f"Sample {index} requires exactly two precursors")
+        if not isinstance(synthesis, dict):
+            raise ValueError(f"Sample {index} is missing synthesis data and heating temperature")
+        if synthesis.get("heating_temperature") is None:
+            raise ValueError(f"Sample {index} is missing synthesis.heating_temperature")
         names = []
         fields = ["sample_id", "precursors", "synthesis.heating_temperature"]
         for position, precursor in enumerate(precursors):
