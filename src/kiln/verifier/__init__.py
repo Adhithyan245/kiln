@@ -2,16 +2,22 @@
 
 import math
 import re
-from typing import Protocol, Sequence
+from typing import Mapping, Protocol, Sequence
 
 from kiln.schemas import Artifact, ComputeRequest, ComputeStatus, Cost, RunConfig, VerifierStatus
 
 
 # Numeric value keys are the unit-bearing keys listed in docs/interfaces.md.
-_NUMERIC_KEYS = frozenset({
-    "dE_ev_per_atom", "dE_mlip_minus_mp_ev_per_atom", "tammann_a_c",
-    "tammann_b_c", "decomposes_at_c", "volatile_above_c",
-})
+# Energies come from the compute service (docs/interfaces.md step 4); Tammann
+# temperatures and precursor properties come from deterministic tools (step 5).
+_COMPUTE_KEYS = frozenset({"dE_ev_per_atom", "dE_mlip_minus_mp_ev_per_atom"})
+_TOOL_KEYS = frozenset({"tammann_a_c", "tammann_b_c", "decomposes_at_c", "volatile_above_c"})
+_NUMERIC_KEYS = _COMPUTE_KEYS | _TOOL_KEYS
+
+
+def _number(value: object) -> bool:
+    return (isinstance(value, (float, int)) and not isinstance(value, bool)
+            and math.isfinite(value))
 
 
 def _forbidden_key(key: str) -> bool:
@@ -30,18 +36,29 @@ def verify(
     artifact: Artifact,
     board: Board,
     *,
-    requests: Sequence[ComputeRequest] | None = None,
-    config: RunConfig | None = None,
-    item_cost: Cost | None = None,
+    requests: Sequence[ComputeRequest] | None,
+    config: RunConfig | None,
+    item_cost: Cost | None,
+    tool_values: Mapping[str, float | str | bool | None] | None,
 ) -> tuple[VerifierStatus, str]:
-    """Verify an artifact, with optional complete item request log and total cost.
+    """Verify an artifact against the item's compute log, budget and tool outputs.
+
+    The context arguments are required so a caller cannot omit them by
+    accident; pass ``None`` only when an input is genuinely unavailable, and
+    the artifact is then at best inconclusive.
 
     ``requests`` must be the complete compute log for this run and item, and
     ``item_cost`` the cumulative cost for the item, including this artifact.
-    Without these inputs and the run config, acceptance cannot be established.
-    Numerical value keys map to identical keys in every cited compute result.
-    Values without a matching result key are inconclusive: other documented
-    tools have no result lookup in the board contract.
+    ``tool_values`` holds the deterministic tool outputs for the item,
+    recomputed by the caller (``tammann_a_c``/``tammann_b_c`` for precursors a
+    and b, ``decomposes_at_c``, ``volatile_above_c``); it must never be copied
+    from the artifact under check.
+
+    Energy keys must equal the same key in at least one cited compute result,
+    so an escalated artifact may cite both the cached and the refined request.
+    Tool keys must equal ``tool_values``; compute results never establish them,
+    and ``tool_values`` never establishes an energy. A value with no source
+    is inconclusive.
     """
     errors: list[str] = []
     unknown: list[str] = []
@@ -106,12 +123,21 @@ def verify(
             if not math.isfinite(value):
                 errors.append(f"Non-finite value: {key}")
                 continue
+            if key in _TOOL_KEYS:
+                if tool_values is None or key not in tool_values:
+                    unknown.append(f"no tool value for numeric value: {key}")
+                elif not _number(tool_values[key]):
+                    errors.append(f"Invalid tool value: {key}")
+                elif tool_values[key] != value:
+                    errors.append(f"Numeric value differs from tool value: {key}")
+                continue
             sources = [request.result[key] for request in cited if key in request.result]
             if not sources:
                 unknown.append(f"no compute result for numeric value: {key}")
-            elif any(isinstance(source, bool) or not isinstance(source, (int, float))
-                     or not math.isfinite(source) or source != value for source in sources):
-                errors.append(f"Numeric value differs from compute result: {key}")
+            elif not all(_number(source) for source in sources):
+                errors.append(f"Invalid compute result for numeric value: {key}")
+            elif value not in sources:
+                errors.append(f"Numeric value differs from every cited compute result: {key}")
 
     if requests is not None and len(cited) == len(artifact.compute_requests):
         charges = [request.compute_units for request in cited]
