@@ -1,26 +1,29 @@
 {
   "status": "PROPOSAL (Adhi, compute science). Hemanath freezes prices and budget in protocol.md at code freeze.",
-  "created_at": "2026-10-31T20:55:24.677566+00:00",
+  "created_at": "2026-10-31T21:25:54.200784+00:00",
   "measured_on": {
     "host": "promaxgb10-99ea",
     "machine": "aarch64",
-    "source": "results/gb10/profile_s0.json"
+    "source": "results/gb10/profile_s0_fix.json"
   },
-  "compute_unit": "median single_point GPU-seconds = 0.5270888755003398 s",
+  "compute_unit": "median single_point GPU-seconds = 0.49578814350024913 s",
   "tier_prices": {
     "cached_lookup": 0.1,
     "single_point": 1.0,
-    "bounded_relaxation": 50.0,
+    "bounded_relaxation": 30.0,
     "decomposition_reeval": 0.2
   },
-  "max_compute_units_per_item": 51.0,
+  "max_compute_units_per_item": 31.0,
   "night2": {
-    "worst_case_gpu_seconds_per_item": 26.88,
-    "main_run_worst_case_gpu_hours": 33.06,
+    "worst_case_gpu_seconds_per_item": 15.37,
+    "main_run_worst_case_gpu_hours": 17.73,
     "usable_gpu_hours": 7.7,
     "main_run_fits": false,
     "second_budget_level_fits": false,
-    "assumptions": "369 held-out items x 4 conditions x 3 seeds; 11.0 h x 1 GPU worker(s), 70% of it planned for"
+    "assumptions": "346 held-out items x 4 conditions x 3 seeds; 11.0 h x 1 GPU worker(s), 70% of it planned for",
+    "main_run_with_cache_gpu_hours_p90": 14.21,
+    "main_run_fits_with_cache": false,
+    "main_run_with_cache_expected_gpu_hours": 4.3
   },
   "measurements": {
     "cached_lookup": {
@@ -43,21 +46,21 @@
         "not_converged": 0,
         "failed": 0
       },
-      "median_gpu_seconds": 0.5270888755003398,
-      "p90_gpu_seconds": 0.7365303240003414,
+      "median_gpu_seconds": 0.49578814350024913,
+      "p90_gpu_seconds": 0.7364142740007082,
       "median_relative_to_single_point": 1.0
     },
     "bounded_relaxation": {
       "n": 20,
       "status": {
-        "ok": 0,
+        "ok": 13,
         "cached": 0,
-        "not_converged": 20,
+        "not_converged": 7,
         "failed": 0
       },
-      "median_gpu_seconds": 26.240973459999623,
-      "p90_gpu_seconds": 149.77689108400045,
-      "median_relative_to_single_point": 49.78472261455024
+      "median_gpu_seconds": 14.785125326500747,
+      "p90_gpu_seconds": 147.16023664100067,
+      "median_relative_to_single_point": 29.821458056899495
     }
   },
   "rules": [
@@ -67,5 +70,11 @@
     "decomposition_reeval: two MP reaction evaluations (2 x floor) plus any measured GPU time",
     "budget per pair: one escalation path (cached_lookup + single_point + bounded_relaxation + decomposition_reeval)",
     "second budget level: only if a full second main run also fits Night 2"
+  ],
+  "notes": [
+    "Measured on the GB10 after the phase-set and relaxation fixes (commit d4f012d; results/gb10/profile_s0_fix.json); replaces the earlier proposal, whose relaxation price was inflated by solid O2 failing to converge in every pair.",
+    "Relaxations: 13 of 20 dev pairs converged in that run; a later gas-molecule fix (376cde2) also converged 2 of the 3 BaO2 pairs. The rest are honest not_converged (hydrated oxalate, ammonium phosphates, a barium superoxide product).",
+    "Capacity: with the result cache (identical calculations computed once, every request still charged in full) each pair needs at most one real calculation per tier: 346 x mean(0.7 s single point + 44.2 s relaxation) = 4.3 GPU-hours expected, within 7.7 usable on one GB10. The p90 figure assumes every pair is as slow as the slowest tenth and is an upper bound.",
+    "Gemini calls, not the GPU, are the likely wall-clock limit overnight: set from the 7 PM dry run."
   ]
 }

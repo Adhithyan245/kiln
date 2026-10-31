@@ -71,4 +71,4 @@ Then Hemanath scores on his machine (labels never leave it), after checking the 
 ## 7. Capacity (filled in from the profiling rerun)
 
 - Main run: 346 held-out items x 4 conditions x 3 seeds = 4,152 item runs.
-- Per-item worst case and whether it fits one GB10 overnight: *see `protocol/prices_proposal.json` after the rerun*. If it doesn't fit: fill the relaxation cache for held-out pairs before 7:30 PM (cache hits are still charged in full, so fairness is unchanged), add Brev workers, or drop to 2 seeds (the plan's cut list).
+- From the profiling rerun: about **4.3 GPU-hours expected** with the result cache (346 pairs x mean 45 s), against 7.7 usable on one GB10, so the GPU fits. The no-cache worst case (17.7 h) assumes every item, condition and seed recomputes everything. Gemini calls are the likely limit: time them in the dry run. If it doesn't fit: fill the relaxation cache for held-out pairs before 7:30 PM (cache hits are still charged in full, so fairness is unchanged), add Brev workers, or drop to 2 seeds (the plan's cut list).

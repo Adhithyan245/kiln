@@ -48,3 +48,7 @@ Source: `results/gb10/first_calcs_float64.json`, `results/gb10/first_calcs_float
 
 - **Decision:** ASE (`FrechetCellFilter` + FIRE2) stays the default for Night 2. A 1.3x speed-up does not justify 3 in 40 relaxations failing to converge, which would become review flags. The gap is the cell algorithm, not throughput: per step both are similar, and the Frechet log-strain cell update converges in far fewer steps.
 - To use the Toolkit anyway: `"backend": "nvalchemi"`, plus `"fire_tmax": 1.0, "fire_maxstep": 0.2, "dt": 0.2`. A hybrid (Toolkit batch first, ASE to finish what it leaves unconverged) is the natural next step, after the event.
+
+## 5. Prices and per-item budget: proposed (Sat Oct 31, for Hemanath to freeze)
+
+From the GB10 profiling rerun after the phase-set and relaxation fixes (`results/gb10/profile_s0_fix.json`, 20 dev pairs, float32): compute unit = median `single_point` GPU-seconds (0.50 s); **cached_lookup 0.1, single_point 1, bounded_relaxation 30, decomposition_reeval 0.2**; **31 units per item** (one escalation path). Night 2: 346 held-out items x 4 conditions x 3 seeds; with the result cache about **4.3 GPU-hours expected** on one GB10 (7.7 usable), so no Brev workers are needed for the GPU. Full numbers and notes: `protocol/prices_proposal.json`.
