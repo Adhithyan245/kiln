@@ -76,4 +76,6 @@ def test_items_file_gives_the_same_seeded_sample_as_the_ledger(tmp_path: Path, m
 def test_bundled_settings_load_and_satisfy_the_client(tmp_path: Path) -> None:
     settings = load_tier_settings(Path(__file__).parents[2] / "env" / "gb10" / "tier_settings.json")
     assert set(settings) == set(ComputeTier)
+    # float32 decided in docs/compute-decisions.md; part of the cache key, so profile and fill with it
+    assert settings[ComputeTier.single_point]["dtype"] == settings[ComputeTier.bounded_relaxation]["dtype"] == "float32"
     ComputeClient(tmp_path / "x", profile_config("x"), TimedBackend(), ResultCache(tmp_path / "c"), settings)

@@ -35,7 +35,9 @@ note = "Labels-absent check is done by the runner before any step."
 name = "run_conditions"
 # TODO-owner-Adhi: kiln.runners.conditions has no CLI yet. Expected: run C1-C4 x seeds on held-out
 # items, resumable per item, writing runs/<run_id>/predictions.jsonl and cost.json.
-cmd = ["python", "-m", "kiln.runners.conditions", "--split", "heldout", "--all-conditions", "--all-seeds"]
+# The model is always passed explicitly (docs/compute-decisions.md); the older 2.5 Flash returns 404 for new users.
+cmd = ["python", "-m", "kiln.runners.conditions", "--split", "heldout", "--all-conditions", "--all-seeds",
+       "--model", "gemini-3.8-flash"]
 depends_on = ["preflight"]
 env = ["GEMINI_API_KEY"]
 timeout_s = 36000

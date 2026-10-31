@@ -78,6 +78,13 @@ def test_night2_order_and_gates() -> None:
     assert plan.labels_must_be_absent
 
 
+def test_night2_pins_the_experiment_model() -> None:
+    cmd = load_plan(PLANS / "night2.toml").step("run_conditions").cmd
+    assert cmd[cmd.index("--model") + 1] == "gemini-3.8-flash"
+    for path in PLANS.glob("*.toml"):
+        assert "gemini-2.5-flash" not in path.read_text(encoding="utf-8")  # 404 for new users
+
+
 def test_unknown_dependency_and_cycle_rejected(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="unknown"):
         make_plan([{"name": "a", "cmd": ["x"], "depends_on": ["nope"]}])
