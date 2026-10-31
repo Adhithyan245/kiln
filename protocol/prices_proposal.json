@@ -13,10 +13,10 @@
     "bounded_relaxation": 30.0,
     "decomposition_reeval": 0.2
   },
-  "max_compute_units_per_item": 31.0,
+  "max_compute_units_per_item": 32.0,
   "night2": {
-    "worst_case_gpu_seconds_per_item": 15.37,
-    "main_run_worst_case_gpu_hours": 17.73,
+    "worst_case_gpu_seconds_per_item": 15.87,
+    "main_run_worst_case_gpu_hours": 18.3,
     "usable_gpu_hours": 7.7,
     "main_run_fits": false,
     "second_budget_level_fits": false,
@@ -75,6 +75,7 @@
     "Measured on the GB10 after the phase-set and relaxation fixes (commit d4f012d; results/gb10/profile_s0_fix.json); replaces the earlier proposal, whose relaxation price was inflated by solid O2 failing to converge in every pair.",
     "Relaxations: 13 of 20 dev pairs converged in that run; a later gas-molecule fix (376cde2) also converged 2 of the 3 BaO2 pairs. The rest are honest not_converged (hydrated oxalate, ammonium phosphates, a barium superoxide product).",
     "Capacity: with the result cache (identical calculations computed once, every request still charged in full) each pair needs at most one real calculation per tier: 346 x mean(0.7 s single point + 44.2 s relaxation) = 4.3 GPU-hours expected, within 7.7 usable on one GB10. The p90 figure assumes every pair is as slow as the slowest tenth and is an upper bound.",
-    "Gemini calls, not the GPU, are the likely wall-clock limit overnight: set from the 7 PM dry run."
+    "Gemini calls, not the GPU, are the likely wall-clock limit overnight: set from the 7 PM dry run.",
+    "Budget 31 -> 32 (Sat Oct 31, evening): one escalation path costs 0.1 + 1 + 30 + 0.2 = 31.3 units, and rounding that down to 31 left 29.9 after the lookup and single point, so the 30-unit relaxation was refused (seen in the 1-item live dry run). The budget now rounds up so the whole path always fits."
   ]
 }

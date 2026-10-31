@@ -39,6 +39,13 @@ def test_budget_is_one_escalation_path() -> None:
     assert propose_budget(propose_prices(SUMMARY["tiers"])) == pytest.approx(7.3)   # 0.1 + 1 + 6 + 0.2
 
 
+def test_budget_rounds_up_so_the_whole_path_fits() -> None:
+    prices = {"cached_lookup": 0.1, "single_point": 1.0, "bounded_relaxation": 30.0, "decomposition_reeval": 0.2}
+    budget = propose_budget(prices)
+    assert budget == 32.0   # 31.3 rounded to two figures would be 31, and 1.1 + 30 would not fit
+    assert budget >= sum(prices.values())
+
+
 def test_night2_fit_worst_case() -> None:
     fit = night2_fit(2.0, 7.3, hours=11, workers=1)
     # 369 x 4 x 3 items, each spending 7.3 units x 2 s = 14.6 GPU-s -> about 17.96 GPU hours
