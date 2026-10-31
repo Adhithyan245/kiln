@@ -31,10 +31,11 @@ class BoardError(Exception):
 
 
 class Board:
-    def __init__(self, run_dir: str | Path) -> None:
+    def __init__(self, run_dir: str | Path, name: str = "board") -> None:
+        """name="board" is the shared board; C2 gives each isolated specialist its own name."""
         self.run_dir = Path(run_dir)
         self.run_id = self.run_dir.name
-        self.dir = self.run_dir / "board"
+        self.dir = self.run_dir / name
         self.dir.mkdir(parents=True, exist_ok=True)
         self.artifacts_path = self.dir / "artifacts.jsonl"
         self.needs_path = self.dir / "needs.jsonl"

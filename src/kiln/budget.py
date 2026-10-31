@@ -57,6 +57,13 @@ class Budget:
                 raise BudgetExceeded("compute_units", units, left)
             self._spent.compute_units += units
 
+    def record_usd(self, usd: float) -> None:
+        """Experiment API spend for this item. Recorded for reporting, not capped."""
+        if usd < 0:
+            raise ValueError("usd must be non-negative")
+        with self._lock:
+            self._spent.usd += usd
+
     def remaining(self) -> dict[str, float]:
         with self._lock:
             return {
