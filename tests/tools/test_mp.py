@@ -23,6 +23,16 @@ def test_pair_chemsys_from_precursor_list(tmp_path: Path) -> None:
     assert mp.pair_chemsys_from_precursors(formulas) == ["C-Ca-Li-O", "C-Li-O-Ti", "Ca-O-Ti"]
 
 
+def test_pair_chemsys_from_items_file_covers_only_the_listed_pairs(tmp_path: Path) -> None:
+    from kiln.compute.profile import write_items_file
+    from tests.compute.helpers import make_item
+
+    items = [make_item("PG-1"), make_item("PG-2").model_copy(update={"precursor_a": "CaO", "split": "heldout"})]
+    path = tmp_path / "items.jsonl"
+    write_items_file(path, items)
+    assert mp._all_pair_chemsys(path) == ["C-Ca-O-Ti", "Ca-O-Ti"]
+
+
 def test_reaction_energy_finds_the_favoured_product() -> None:
     result = mp.reaction_energy("CaO", "TiO2", ca_ti_o_entries())
     assert result.products == "CaTiO3"

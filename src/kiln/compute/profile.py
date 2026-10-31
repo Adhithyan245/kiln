@@ -9,6 +9,10 @@ Profiling and pre-warm runs are tagged condition "N1" until the protocol names t
 
     python -m kiln.compute.profile --pairs 20 --seed 0          # profile a dev sample
     python -m kiln.compute.profile --prewarm                     # every dev + held-out pair
+
+A GPU host without the ledger reads the same items from a file made where the ledger is:
+    python -m kiln.compute.profile --export-items items.jsonl    # on a machine with the ledger
+    python -m kiln.compute.profile --items-file items.jsonl --pairs 20 --seed 0
 """
 from __future__ import annotations
 
@@ -89,7 +93,20 @@ def summarize(requests: Sequence[ComputeRequest]) -> dict[str, Any]:
             "note": "Measurements only. Prices and the per-item budget are set by CJ (OPEN-02/03)."}
 
 
-def _items(split: str) -> list[Item]:
+def write_items_file(path: Path, items: Sequence[Item]) -> None:
+    """Agent-visible items as JSON Lines, in ledger order, for a host without the ledger."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(item.model_dump_json() + "\n" for item in items), encoding="utf-8")
+
+
+def read_items_file(path: Path) -> list[Item]:
+    return [Item.model_validate_json(line) for line in Path(path).read_text(encoding="utf-8").splitlines()
+            if line.strip()]
+
+
+def _items(split: str, items_file: Path | None = None) -> list[Item]:
+    if items_file is not None:  # same order as the ledger, so --seed picks the same sample
+        return [item for item in read_items_file(items_file) if item.split == split]
     from kiln.data import load_items  # agent-visible items only; never labels
 
     return load_items(split)  # type: ignore[arg-type]
@@ -106,12 +123,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--runs-dir", type=Path, default=Path("runs"))
     parser.add_argument("--cache-dir", type=Path, default=Path("cache") / "compute")
     parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument("--items-file", type=Path,
+                        help="agent-visible items (JSON Lines) instead of the ledger, for the GPU host")
+    parser.add_argument("--export-items", type=Path, metavar="PATH",
+                        help="write the dev and held-out items from the ledger to PATH and exit")
     args = parser.parse_args(argv)
 
+    if args.export_items:
+        items = _items("dev") + _items("heldout")
+        write_items_file(args.export_items, items)
+        print(f"wrote {len(items)} agent-visible items to {args.export_items}")
+        return 0
     if args.prewarm:
-        items, run_id = _items("dev") + _items("heldout"), "night1-prewarm"
+        items, run_id = _items("dev", args.items_file) + _items("heldout", args.items_file), "night1-prewarm"
     else:
-        dev = _items("dev")
+        dev = _items("dev", args.items_file)
         items = random.Random(args.seed).sample(dev, min(args.pairs, len(dev)))
         run_id = f"profile-{platform.node() or 'host'}-s{args.seed}"
     config = profile_config(run_id)

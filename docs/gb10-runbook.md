@@ -37,12 +37,12 @@ The profiler's backend defaults to `stub`, which gives fake zero timings. **It m
 
 ```bash
 export KILN_COMPUTE_BACKEND=local
-python -m kiln.tools.mp fetch --all-pairs
-python -m kiln.compute.profile --pairs 20 --seed 0 --out results/gb10/profile_s0.json
+python -m kiln.tools.mp fetch --items-file ~/kiln-items.jsonl
+python -m kiln.compute.profile --items-file ~/kiln-items.jsonl --pairs 20 --seed 0 --out results/gb10/profile_s0.json
 python -m kiln.compute.profiling --summary results/gb10/profile_s0.json --hours 11 --workers 1 --out protocol/prices_proposal.json
 ```
 
-- `--all-pairs` and the profiler both read development items through `kiln.data.load_items`, which needs the ledger on this machine. **If the ledger isn't on the GB10** (your `--precursors-file` commit suggests it isn't), tell Adhi: the profiler needs agent-visible development items (formulas and temperatures only) copied here, or a `--items-file` option in `profile.py`. Don't copy the raw ledger: it holds the locked labels.
+- The ledger is not on the GB10, and must not be copied there: it holds the locked labels. Whoever has the ledger makes the items file (agent-visible fields only: formulas, temperatures, split) with `python -m kiln.compute.profile --export-items kiln-items.jsonl` and copies it to `~/kiln-items.jsonl` on the GB10, outside the repo. It keeps the ledger's order, so `--seed 0` picks the same 20 pairs as a run against the ledger.
 - `--hours 11` is 7:30 PM to about 6:30 AM. Change `--workers` to the number of GPU workers Night 2 will really have (GB10 plus Brev).
 
 **Expect:** per-tier median and p90 GPU-seconds, then the proposed prices, per-pair budget and whether the main run (and a second budget level) fits Night 2.

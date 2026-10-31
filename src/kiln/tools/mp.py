@@ -135,12 +135,16 @@ def reaction_energy(formula_a: str, formula_b: str, entries: list[ComputedEntry]
     return ReactionEnergy(dE_ev_per_atom=float(energy), mixing_ratio=float(x), products=products)
 
 
-def _all_pair_chemsys() -> list[str]:
-    from kiln.data import load_items  # agent-visible items only; never labels
+def _all_pair_chemsys(items_file: Path | None = None) -> list[str]:
+    if items_file is not None:  # the file profile --export-items writes; no ledger needed here
+        from kiln.compute.profile import read_items_file
 
-    systems = {chemsys_for(i.precursor_a, i.precursor_b)
-               for split in ("dev", "heldout") for i in load_items(split)}
-    return sorted(systems)
+        items = read_items_file(items_file)
+    else:
+        from kiln.data import load_items  # agent-visible items only; never labels
+
+        items = [i for split in ("dev", "heldout") for i in load_items(split)]
+    return sorted({chemsys_for(i.precursor_a, i.precursor_b) for i in items})
 
 
 def pair_chemsys_from_precursors(formulas: list[str]) -> list[str]:
@@ -162,12 +166,16 @@ def main(argv: list[str] | None = None) -> int:
     group.add_argument("--all-pairs", action="store_true", help="pairs from kiln.data (needs the ledger here)")
     group.add_argument("--precursors-file", type=Path,
                        help="one precursor formula per line; fetches every pair's chemical system")
+    group.add_argument("--items-file", type=Path,
+                       help="agent-visible items (JSON Lines, from profile --export-items); fetches each pair")
     group.add_argument("--chemsys", action="append")
     fetch.add_argument("--cache-dir", type=Path, default=CACHE_DIR)
     args = parser.parse_args(argv)
 
     if args.all_pairs:
         systems = _all_pair_chemsys()
+    elif args.items_file:
+        systems = _all_pair_chemsys(args.items_file)
     elif args.precursors_file:
         systems = pair_chemsys_from_precursors(_read_precursors(args.precursors_file))
     else:

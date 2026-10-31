@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from pathlib import Path
 
 import pytest
@@ -8,7 +9,8 @@ from kiln.budget import Budget
 from kiln.compute.backends import BackendResult
 from kiln.compute.cache import ResultCache
 from kiln.compute.client import ComputeClient
-from kiln.compute.profile import load_tier_settings, profile_config, run_profile, summarize
+from kiln.compute.profile import (_items, load_tier_settings, main, profile_config, read_items_file, run_profile,
+                                  summarize, write_items_file)
 from kiln.schemas import ComputeStatus, ComputeTier
 from tests.compute.helpers import TEST_SETTINGS, make_item
 
@@ -51,6 +53,24 @@ def test_cached_requests_are_excluded_from_timing(tmp_path: Path) -> None:
     assert requests[0].status == ComputeStatus.cached
     stats = summarize(requests)["tiers"]["single_point"]
     assert stats["median_gpu_seconds"] is None and stats["status"]["cached"] == 1
+
+
+def test_items_file_round_trips_and_keeps_split_and_order(tmp_path: Path) -> None:
+    items = [make_item("PG-3"), make_item("PG-1").model_copy(update={"split": "heldout"}), make_item("PG-2")]
+    path = tmp_path / "items.jsonl"
+    write_items_file(path, items)
+    assert read_items_file(path) == items
+    assert [i.item_id for i in _items("dev", path)] == ["PG-3", "PG-2"]
+    assert [i.item_id for i in _items("heldout", path)] == ["PG-1"]
+
+
+def test_items_file_gives_the_same_seeded_sample_as_the_ledger(tmp_path: Path, monkeypatch) -> None:
+    dev = [make_item(f"PG-{n}") for n in range(30)]
+    monkeypatch.setattr("kiln.data.load_items", lambda split: dev if split == "dev" else [])
+    path = tmp_path / "items.jsonl"
+    assert main(["--export-items", str(path)]) == 0
+    sample = lambda items: [i.item_id for i in random.Random(0).sample(items, 20)]  # noqa: E731
+    assert sample(_items("dev", path)) == sample(_items("dev"))
 
 
 def test_bundled_settings_load_and_satisfy_the_client(tmp_path: Path) -> None:
