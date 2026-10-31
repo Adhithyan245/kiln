@@ -71,12 +71,25 @@ def fetch_chemsys(chemsys: str, *, cache_dir: Path = CACHE_DIR, api_key: str | N
     return path
 
 
+def _str_keys(value: object) -> object:
+    """Dict keys as plain strings, recursively. MP returns entry.data["oxidation_states"] keyed by
+    pymatgen Element objects, which pymatgen's own as_dict() can't serialise."""
+    if isinstance(value, dict):
+        return {str(k): _str_keys(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_str_keys(v) for v in value]
+    return value
+
+
 def _write_entries(path: Path, entries: list[ComputedEntry]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    for e in entries:
+        e.data = _str_keys(e.data)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-", suffix=".json")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump([e.as_dict() for e in entries], f)
+            # default=str: MP also returns entry_id as an EntryID object rather than a string.
+            json.dump([e.as_dict() for e in entries], f, default=str)
         os.replace(tmp, path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
