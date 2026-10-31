@@ -16,7 +16,7 @@ Kiln is an auditable, budget-aware triage system for solid-state reactions. Spec
 8. **All computation goes through the compute service and the budget.** Every request is charged at the frozen price for its tier, **even on a cache hit**, and logged with a reason. Never call ALCHEMI directly from an agent, and never bypass the budget.
 9. **Never hide failures.** A non-converged relaxation, an errored request or a missing property is logged as such and raises a review flag; it is never silently replaced or dropped.
 10. **Flags are flags.** Never present review flags, scores or stated causes as calibrated probabilities or validated failure causes.
-11. **Scope for the first complete experiment is fixed:** no Glass/MD, no extra model families, no additional agents, no live new-candidate mode, and no second budget level unless the team agrees after profiling. Experiment runs use the Gemini key only.
+11. **Scope for the first complete experiment is fixed:** no Glass/MD, no extra model families, no additional agents, no live new-candidate mode, and no second budget level unless the team agrees after profiling. The main comparison (C1–C4, all seeds) runs on Gemini only. Two **secondary** results run after it and are always reported separately, never pooled with the main table: a Claude replication on ~120 held-out pairs (1 seed) and the N2 memorization probe on an OpenAI model. Credit use is in `docs/credits.md`.
 
 ## How we build
 - **One complete example first.** Until the 11 AM Saturday vertical slice works (one development pair through agents → GB10 request → verifier → score → evidence card), prefer wiring things together over adding features.
