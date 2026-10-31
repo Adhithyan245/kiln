@@ -3,9 +3,10 @@
 This module defines the shape of a scoring rule set, not its contents. It holds
 no weights, thresholds, category boundaries, evidence mappings, fallback values
 or freeze status, and nothing here defaults to a scientific choice: every such
-value is a required input. Choosing the real rule set is protocol OPEN-05.
-Whether a given rule set is the frozen one is decided outside this module, by
-the verifier passed to ``kiln.scoring.score.ScoringEngine``.
+value is a required input. The real rule set (protocol OPEN-05) is the file
+``protocol/scoring_rules.json``. Whether a given rule set is the frozen one is
+decided outside this module, by the verifier passed to
+``kiln.scoring.score.ScoringEngine``.
 """
 from __future__ import annotations
 
@@ -13,7 +14,7 @@ import hashlib
 import json
 from typing import Annotated, Literal, get_args
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 from kiln.schemas import AgentName, Artifact, Category, ReviewReason
 
@@ -23,6 +24,9 @@ NUMERIC_VALUE_KEYS = frozenset({
     "dE_ev_per_atom", "dE_mlip_minus_mp_ev_per_atom", "tammann_a_c", "tammann_b_c",
     "decomposes_at_c", "volatile_above_c",
 })
+# The value keys that are temperatures in °C, so they can be compared with the
+# furnace setpoint (Item.temperature_c, also °C).
+TEMPERATURE_VALUE_KEYS = frozenset({"tammann_a_c", "tammann_b_c", "decomposes_at_c", "volatile_above_c"})
 ARTIFACT_TYPES = frozenset(get_args(Artifact.model_fields["type"].annotation))
 # Reserved condition subject: the score itself rather than a feature.
 P_REACT = "p_react"
@@ -70,18 +74,52 @@ class Feature(_Frozen):
     Several accepted artifacts for that source must agree: ``require_equal``
     compares them all, ``latest_created`` compares those with the latest
     ``created_at``. When no source has a value, ``fallback`` is used and the
-    prediction gets a missing-evidence flag; ``None`` makes scoring fail.
+    prediction gets a missing-evidence flag. When the artifacts disagree,
+    ``fallback`` is used and the prediction gets a conflict flag. A ``None``
+    fallback makes scoring fail in both cases.
+
+    ``kind`` says what the feature's number is:
+
+    - ``value``: the accepted value itself.
+    - ``furnace_minus_value``: the item's furnace setpoint minus the accepted
+      value, in °C. Only temperature value keys are allowed. The setpoint is
+      the one item field a rule may read; it is an experimental input, not an
+      outcome and not an LLM output.
+    - ``present``: 1.0 when the sources give one agreed accepted value (as a
+      ``value`` feature with the same sources would, without its fallback),
+      otherwise 0.0. It never flags by itself, so ``fallback`` must be
+      ``None``; pair it with a ``value`` feature on the same sources when a
+      missing value must be flagged.
+
+    A fallback is the feature's own number: for ``furnace_minus_value`` it is
+    the margin itself, not a temperature subtracted from the setpoint.
     """
     name: Name
     sources: tuple[EvidenceSource, ...] = Field(min_length=1)
     on_multiple: Literal["require_equal", "latest_created"]
     fallback: float | None
+    kind: Literal["value", "furnace_minus_value", "present"] = "value"
 
     @model_validator(mode="after")
     def _unique_sources(self) -> Feature:
         if len(set(self.sources)) != len(self.sources):
             raise ValueError(f"feature {self.name!r} lists a source twice")
+        if self.kind == "present" and self.fallback is not None:
+            raise ValueError(f"presence feature {self.name!r} cannot have a fallback")
+        if self.kind == "furnace_minus_value":
+            for source in self.sources:
+                if source.value_key not in TEMPERATURE_VALUE_KEYS:
+                    raise ValueError(f"feature {self.name!r}: {source.value_key!r} is not a temperature in °C")
         return self
+
+    @model_serializer(mode="wrap")
+    def _omit_value_kind(self, handler):  # type: ignore[no-untyped-def]
+        # ``kind`` was added after rule sets were attested; leaving out the
+        # default keeps the canonical form, and so every earlier digest, unchanged.
+        data = handler(self)
+        if self.kind == "value":
+            data.pop("kind", None)
+        return data
 
 
 class Term(_Frozen):

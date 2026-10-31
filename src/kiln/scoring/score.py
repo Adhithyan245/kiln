@@ -1,22 +1,31 @@
 """Scoring entry points and a configured deterministic scoring engine.
 
 The module-level ``provisional`` and ``score`` (docs/interfaces.md steps 4 and
-9) fail closed: the scoring rules are not frozen (protocol OPEN-05), so no rule
-set, default, or numerical threshold is defined here.
+9) apply the fixed rule set in ``protocol/scoring_rules.json`` (protocol
+OPEN-05). ``load_frozen_rules`` reads that file and fails closed unless the
+rules' SHA-256 digest equals ``FROZEN_RULES_SHA256`` below, so an edited rule
+file cannot be used without a reviewed code change. No threshold or weight is
+defined in this module.
 
 ``ScoringEngine`` applies an explicit ``ScoringRules`` (``rules.py``) for one
 run. It refuses to start unless a caller-supplied verifier returns the literal
-True for the rule set's SHA-256 digest. No trusted verifier exists yet;
-integrators must bind one to the frozen protocol before any real run. Numbers
-come only from verifier-accepted artifact values through the configured rules;
-rationales, claims and item fields never set a number.
+True for the rule set's SHA-256 digest; ``frozen_engine`` binds it to
+``is_frozen_digest``. Numbers come only from verifier-accepted artifact values
+through the configured rules. The furnace setpoint is the only item field a
+rule may read (``Feature.kind == "furnace_minus_value"``); rationales, claims
+and other item fields never set a number.
+
+``changed_prediction`` is the OPEN-17 definition: a compute request changed
+the prediction when the provisional four-class category differs before and
+after it.
 """
 from __future__ import annotations
 
+import json
 import math
 import operator
 from collections.abc import Callable, Sequence
-from typing import NoReturn
+from pathlib import Path
 
 from kiln.schemas import (
     Artifact,
@@ -32,6 +41,11 @@ from kiln.schemas import (
     VerifierStatus,
 )
 from kiln.scoring.rules import P_REACT, EvidenceSource, Feature, Outcome, ScoringRules
+
+# The frozen rule file and the digest of the rules it must contain (OPEN-05).
+# Changing either the file's rules or this digest is a protocol change.
+FROZEN_RULES_PATH = Path(__file__).resolve().parents[3] / "protocol" / "scoring_rules.json"
+FROZEN_RULES_SHA256 = "4390d1a05adef5e6ed3afd4b9a796ff793a0aa936d0860c0a9fffe0a29a65e14"
 
 
 class ScoringConfigurationError(RuntimeError):
@@ -116,19 +130,49 @@ def _validate_inputs(
     return run_id
 
 
-def _require_frozen_rules() -> NoReturn:
-    raise ScoringConfigurationError(
-        "Scoring requires explicitly configured frozen rules (protocol OPEN-05); "
-        "score also requires run context and the item's cost. Use ScoringEngine "
-        "with explicit ScoringRules, a RunConfig, and a verifier that attests "
-        "the rules are frozen."
-    )
+def is_frozen_digest(digest: str) -> bool:
+    """True only for the digest of the frozen rule set (OPEN-05)."""
+    return isinstance(digest, str) and digest == FROZEN_RULES_SHA256
+
+
+def load_frozen_rules(path: Path | str | None = None) -> ScoringRules:
+    """The frozen rule set, read from ``protocol/scoring_rules.json``.
+
+    The file holds the rules under ``"rules"``, their digest under
+    ``"rules_sha256"``, and citations and notes that do not affect scoring.
+    Fails closed if the file is missing or invalid, if the recorded digest
+    does not match the rules, or if the rules are not the frozen ones.
+    """
+    path = FROZEN_RULES_PATH if path is None else Path(path)
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+        rules = ScoringRules.model_validate_json(json.dumps(document["rules"], allow_nan=False))
+        recorded = document["rules_sha256"]
+    except Exception as exc:
+        raise ScoringConfigurationError(f"Scoring rules at {path} are missing or invalid") from exc
+    digest = rules.digest()
+    if recorded != digest:
+        raise ScoringConfigurationError(f"{path} records digest {recorded!r} but its rules hash to {digest}")
+    if not is_frozen_digest(digest):
+        raise ScoringConfigurationError(f"Scoring rules {digest} in {path} are not the frozen rules "
+                                        f"({FROZEN_RULES_SHA256})")
+    return rules
+
+
+def frozen_engine(config: RunConfig) -> ScoringEngine:
+    """A ``ScoringEngine`` for one run under the frozen rules. Fits ``Components.scorer``."""
+    return ScoringEngine(load_frozen_rules(), config, verify_frozen_rules=is_frozen_digest)
 
 
 def provisional(item: Item, accepted: Sequence[Artifact]) -> tuple[float, Category]:
-    """Fail closed: no frozen rules are configured. See ``ScoringEngine``."""
-    _validate_artifacts(item, tuple(accepted))
-    _require_frozen_rules()
+    """``(p_react, category)`` under the frozen rules, for the before/after log.
+
+    Needs no run context: it builds no prediction and adds no flags. Missing or
+    conflicting evidence uses the rule set's fallbacks, exactly as ``score``.
+    """
+    accepted = tuple(accepted)
+    _validate_artifacts(item, accepted)
+    return _provisional(load_frozen_rules(), item, accepted)
 
 
 def score(
@@ -136,10 +180,40 @@ def score(
     accepted: Sequence[Artifact],
     requests: Sequence[ComputeRequest],
     flags: Sequence[ReviewFlag],
+    *,
+    config: RunConfig | None = None,
+    cost: Cost | None = None,
+    gpu_seconds_from_log: bool = False,
 ) -> Prediction:
-    """Fail closed: no frozen rules are configured. See ``ScoringEngine``."""
+    """Prediction for one item under the frozen rules. See ``ScoringEngine.score``.
+
+    A prediction needs the run context and the item's cost, so ``config`` and
+    ``cost`` are required; without them this fails closed.
+    """
     _validate_inputs(item, tuple(accepted), tuple(requests), tuple(flags))
-    _require_frozen_rules()
+    if config is None or cost is None:
+        raise ScoringConfigurationError(
+            "score requires run context (config=RunConfig) and the item's cost (cost=Cost); "
+            "use frozen_engine(config).score(...) or pass both")
+    return frozen_engine(config).score(item, accepted, requests, flags, cost=cost,
+                                       gpu_seconds_from_log=gpu_seconds_from_log)
+
+
+def changed_prediction(before: tuple[float, Category], after: tuple[float, Category]) -> bool:
+    """OPEN-17: a request changed the prediction when the provisional category differs.
+
+    ``before`` and ``after`` are ``provisional`` results on the item's accepted
+    evidence just before and just after the request's evidence was accepted. A
+    change in ``p_react`` alone does not count: it is a fixed-rule score, not a
+    calibrated probability, so only a change of the four-class call is a change
+    of prediction. Fits ``kiln.compute.accounting.replay_changes(changed=...)``.
+    """
+    categories = []
+    for result in (before, after):
+        if not isinstance(result, tuple) or len(result) != 2:
+            raise TypeError("before and after must be (p_react, category) tuples")
+        categories.append(Category(result[1]))
+    return categories[0] != categories[1]
 
 
 def _number(artifact: Artifact, key: str) -> float:
@@ -162,6 +236,87 @@ def _select(feature: Feature, source: EvidenceSource,
             f"feature {feature.name!r}: accepted artifacts "
             f"{[a.artifact_id for a, _ in chosen]} give different values for {source.value_key!r}")
     return chosen[0][1], [artifact.artifact_id for artifact, _ in chosen]
+
+
+class _Resolved:
+    """Feature values for one item, with what was used and what fell back."""
+
+    def __init__(self) -> None:
+        self.values: dict[str, float] = {}
+        self.used: set[str] = set()
+        self.missing: list[Feature] = []
+        self.conflicts: list[tuple[Feature, ConflictingEvidenceError, list[str]]] = []
+
+
+def _resolve(rules: ScoringRules, item: Item, accepted: tuple[Artifact, ...]) -> _Resolved:
+    out = _Resolved()
+    for feature in rules.features:
+        found: tuple[float, list[str]] | None = None
+        conflict: tuple[ConflictingEvidenceError, list[str]] | None = None
+        for source in feature.sources:
+            # A null value records the property as unknown, so it is skipped.
+            candidates = [a for a in accepted if a.agent == source.agent
+                          and a.type == source.artifact_type
+                          and a.values.get(source.value_key) is not None]
+            if candidates:
+                try:
+                    found = _select(feature, source, candidates)
+                except ConflictingEvidenceError as exc:
+                    # A conflict is not resolved by trying a lower-priority source.
+                    conflict = (exc, [a.artifact_id for a in candidates])
+                break
+        if feature.kind == "present":
+            out.values[feature.name] = 1.0 if found is not None else 0.0
+            if found is not None:
+                out.used.update(found[1])
+            continue
+        if found is not None:
+            number = found[0]
+            if feature.kind == "furnace_minus_value":
+                number = float(item.temperature_c) - number
+                if not math.isfinite(number):
+                    raise ValueError(f"feature {feature.name!r} is not finite")
+            out.values[feature.name] = number
+            out.used.update(found[1])
+            continue
+        if feature.fallback is None:
+            if conflict is not None:
+                raise conflict[0]
+            raise MissingEvidenceError(
+                f"no verifier-accepted value for feature {feature.name!r} and no fallback is configured")
+        out.values[feature.name] = feature.fallback
+        if conflict is not None:
+            out.conflicts.append((feature, conflict[0], conflict[1]))
+        else:
+            out.missing.append(feature)
+    return out
+
+
+def _linear(rules: ScoringRules, values: dict[str, float]) -> float:
+    spec = rules.p_react
+    parts = [spec.intercept, *(term.weight * values[term.feature] for term in spec.terms)]
+    if not all(math.isfinite(part) for part in parts):
+        raise ValueError("a score term is not finite")
+    z = math.fsum(parts)
+    if not math.isfinite(z):
+        raise ValueError("the linear score is not finite")
+    if spec.link == "logistic":
+        return 1.0 / (1.0 + math.exp(-z)) if z >= 0 else math.exp(z) / (1.0 + math.exp(z))
+    return min(1.0, max(0.0, z))
+
+
+def _category(rules: ScoringRules, p_react: float, values: dict[str, float]) -> Outcome:
+    subjects = {P_REACT: p_react, **values}
+    for rule in rules.category_rules:
+        if all(_OPS[c.op](subjects[c.subject], c.threshold) for c in rule.when):
+            return rule.outcome
+    return rules.otherwise
+
+
+def _provisional(rules: ScoringRules, item: Item, accepted: tuple[Artifact, ...]) -> tuple[float, Category]:
+    values = _resolve(rules, item, accepted).values
+    p_react = _linear(rules, values)
+    return p_react, _category(rules, p_react, values).category
 
 
 class ScoringEngine:
@@ -220,57 +375,11 @@ class ScoringEngine:
         if run_id is not None and run_id != self._run_id:
             raise ValueError(f"inputs are from run {run_id!r}, not the configured run {self._run_id!r}")
 
-    def _resolve(self, accepted: tuple[Artifact, ...]) -> tuple[dict[str, float], set[str], list[Feature]]:
-        values: dict[str, float] = {}
-        used: set[str] = set()
-        fallbacks: list[Feature] = []
-        for feature in self._rules.features:
-            found = None
-            for source in feature.sources:
-                # A null value records the property as unknown, so it is skipped.
-                candidates = [a for a in accepted if a.agent == source.agent
-                              and a.type == source.artifact_type
-                              and a.values.get(source.value_key) is not None]
-                if candidates:
-                    found = _select(feature, source, candidates)
-                    break
-            if found is not None:
-                values[feature.name] = found[0]
-                used.update(found[1])
-            elif feature.fallback is None:
-                raise MissingEvidenceError(
-                    f"no verifier-accepted value for feature {feature.name!r} and no fallback is configured")
-            else:
-                values[feature.name] = feature.fallback
-                fallbacks.append(feature)
-        return values, used, fallbacks
-
-    def _p_react(self, values: dict[str, float]) -> float:
-        spec = self._rules.p_react
-        parts = [spec.intercept, *(term.weight * values[term.feature] for term in spec.terms)]
-        if not all(math.isfinite(part) for part in parts):
-            raise ValueError("a score term is not finite")
-        z = math.fsum(parts)
-        if not math.isfinite(z):
-            raise ValueError("the linear score is not finite")
-        if spec.link == "logistic":
-            return 1.0 / (1.0 + math.exp(-z)) if z >= 0 else math.exp(z) / (1.0 + math.exp(z))
-        return min(1.0, max(0.0, z))
-
-    def _outcome(self, p_react: float, values: dict[str, float]) -> Outcome:
-        subjects = {P_REACT: p_react, **values}
-        for rule in self._rules.category_rules:
-            if all(_OPS[c.op](subjects[c.subject], c.threshold) for c in rule.when):
-                return rule.outcome
-        return self._rules.otherwise
-
     def provisional(self, item: Item, accepted: Sequence[Artifact]) -> tuple[float, Category]:
         """Score and category from accepted artifacts, for the before/after log."""
         accepted = tuple(accepted)
         self._check_run(_validate_artifacts(item, accepted))
-        values, _, _ = self._resolve(accepted)
-        p_react = self._p_react(values)
-        return p_react, self._outcome(p_react, values).category
+        return _provisional(self._rules, item, accepted)
 
     def score(
         self,
@@ -295,7 +404,9 @@ class ScoringEngine:
         artifacts may cite the same request. Tool calls, tokens and USD are
         not in the compute log and are taken from ``cost`` as given. Every flag
         is kept. Scoring adds a missing-evidence flag for each feature that
-        used its fallback, and a failed-computation flag for each failed or
+        used its fallback because no value was accepted, a conflict flag for
+        each feature that used its fallback because accepted artifacts
+        disagree, and a failed-computation flag for each failed or
         non-converged request that no failed-computation flag cites.
 
         ``gpu_seconds_from_log=True`` is for a ``cost`` that does not measure
@@ -311,9 +422,10 @@ class ScoringEngine:
         accepted, requests, flags = tuple(accepted), tuple(requests), tuple(flags)
         self._check_run(_validate_inputs(item, accepted, requests, flags))
         cost = _check_cost(cost, requests, gpu_seconds_from_log=gpu_seconds_from_log)
-        values, used, fallbacks = self._resolve(accepted)
-        p_react = self._p_react(values)
-        outcome = self._outcome(p_react, values)
+        resolved = _resolve(self._rules, item, accepted)
+        values, used = resolved.values, resolved.used
+        p_react = _linear(self._rules, values)
+        outcome = _category(self._rules, p_react, values)
 
         cited = {request_id for flag in flags if flag.reason == ReviewReason.failed_computation
                  for request_id in flag.evidence}
@@ -322,7 +434,13 @@ class ScoringEngine:
             reason=ReviewReason.missing_evidence,
             detail=(f"No verifier-accepted value for scoring feature {feature.name!r}; "
                     f"the configured fallback {feature.fallback!r} was used."),
-        ) for feature in fallbacks]
+        ) for feature in resolved.missing]
+        review_flags += [ReviewFlag(
+            reason=ReviewReason.conflict,
+            detail=(f"Verifier-accepted artifacts disagree on scoring feature {feature.name!r} ({error}); "
+                    f"the configured fallback {feature.fallback!r} was used."),
+            evidence=artifact_ids,
+        ) for feature, error, artifact_ids in resolved.conflicts]
         review_flags += [ReviewFlag(
             reason=ReviewReason.failed_computation,
             detail=f"Compute request {request.request_id!r} ended with status {request.status.value!r}.",
