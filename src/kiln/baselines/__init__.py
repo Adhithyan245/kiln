@@ -1,1 +1,1 @@
-"""Building blocks for the B1 baseline; model fitting is not yet authorized."""
+"""Baseline rules and explicitly configured B1 building blocks."""
