@@ -21,6 +21,10 @@ def flags(item: Item, accepted: Sequence[Artifact], requests: Sequence[ComputeRe
             for side in ("a", "b")) for a in usable):
         result.append(ReviewFlag(reason=ReviewReason.missing_evidence, detail="A precursor decomposition temperature is unknown."))
     for a in usable:
+        if a.values.get("decomposition_conditions_unverified") is True:
+            result.append(ReviewFlag(reason=ReviewReason.missing_evidence,
+                detail="Decomposition re-evaluation uses literature conditions not verified for this experiment.",
+                evidence=[a.artifact_id]))
         if a.values.get("outside_applicability") is True:
             result.append(ReviewFlag(reason=ReviewReason.outside_applicability,
                 detail="The evidence source reports that this item is outside its applicability.", evidence=[a.artifact_id]))

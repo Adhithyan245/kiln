@@ -8,6 +8,20 @@ from kiln.tools.precursors import PrecursorProps, props
 
 
 class PrecursorTests(unittest.TestCase):
+    def test_project_table_has_plain_utf8_and_sourced_decomposition_values(self):
+        import csv
+        path = Path(__file__).resolve().parents[2] / "data" / "precursor_props.csv"
+        self.assertFalse(path.read_bytes().startswith(b"\xef\xbb\xbf"))
+        with path.open(encoding="utf-8", newline="") as stream:
+            reader = csv.DictReader(stream)
+            self.assertEqual(reader.fieldnames[0], "formula")
+            rows = list(reader)
+        self.assertEqual(len(rows), 46)
+        for row in rows:
+            if row["decomposes_at_c"].strip().lower() != "unknown":
+                self.assertTrue(row["decomposition_source"].strip().startswith("https://"))
+                self.assertNotEqual(row["decomposition_product"].strip().lower(), "unknown")
+
     def table(self, text):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)

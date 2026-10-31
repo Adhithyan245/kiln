@@ -27,11 +27,11 @@ from kiln.runners.stubs import StubCompute, StubScorer
 def test_specialists_share_verified_synthetic_evidence(tmp_path):
     run = tmp_path / "synthetic"
     config = RunConfig(run_id="synthetic", condition="C4", seed=1, model="offline",
-        tier_prices={"cached_lookup": 1.0, "single_point": 1.0})
+        tier_prices={"cached_lookup": 1.0, "single_point": 1.0, "decomposition_reeval": 1.0})
     budget = Budget(config)
     board = Board(run)
     service = ComputeClient(run, config, StubBackend(), ResultCache(tmp_path / "cache"),
-        {ComputeTier.cached_lookup: {}, ComputeTier.single_point: {}})
+        {ComputeTier.cached_lookup: {}, ComputeTier.single_point: {}, ComputeTier.decomposition_reeval: {}})
     use(service)
     item = Item(item_id="example", source="alab_demo", precursor_a="CaCO3", precursor_b="TiO2",
         temperature_c=900, melting_point_a_c=825, melting_point_b_c=1843, split="dev")
@@ -80,7 +80,7 @@ def test_specialists_share_verified_synthetic_evidence(tmp_path):
         assert len(board.open_needs(item.item_id, ("firm_up_energy",))) == 1
         thermo.step(item, board, budget)
         assert any(n.type == "firm_up_energy" and n.status == "fulfilled" for n in board.needs(item.item_id))
-        assert len(service.log_path.read_text().splitlines()) == 2
+        assert len(service.log_path.read_text().splitlines()) == 3
     finally:
         use(None)
 
@@ -113,7 +113,7 @@ def test_real_specialists_work_with_verifying_runner_and_stub_compute(tmp_path):
     run = tmp_path / "synthetic"
     run.mkdir()
     config = RunConfig(run_id="synthetic", condition="C4", seed=1, model="offline",
-        tier_prices={"cached_lookup": 1.0, "single_point": 1.0})
+        tier_prices={"cached_lookup": 1.0, "single_point": 1.0, "decomposition_reeval": 1.0})
     compute = StubCompute(run, config.tier_prices)
     components = Components(compute=lambda path, cfg: compute,
         specialists=lambda c, cfg: [Precursor(c), Thermo(c), Kinetics()],

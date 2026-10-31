@@ -55,10 +55,13 @@ class Precursor(Agent):
                and item.temperature_c >= p["decomposes_at_c"] for p in properties.values()):
             budget.charge_tool_call()
             req = self.compute.request(item, self.name, ComputeTier.decomposition_reeval,
-                "A sourced precursor decomposition threshold is reached.",
+                "The furnace temperature reaches a reported decomposition reference; conditions may differ.",
                 {"precursor_a": item.precursor_a, "precursor_b": item.precursor_b,
                  "temperature_c": item.temperature_c, "properties": properties}, budget)
             requests.append(req)
+            # The source's conditions are not established for this experiment.
+            # The request is a conditional estimate, not a confirmed transformation.
+            values["decomposition_conditions_unverified"] = True
             if req.status in (ComputeStatus.ok, ComputeStatus.cached) and req.result.get("dE_ev_per_atom") is not None:
                 values["dE_ev_per_atom"] = req.result["dE_ev_per_atom"]
         spent = budget.spent
