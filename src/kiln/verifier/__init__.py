@@ -1,9 +1,25 @@
 """Deterministic checks on artifacts using the documented board interface."""
 
 import math
+import re
 from typing import Protocol, Sequence
 
 from kiln.schemas import Artifact, ComputeRequest, ComputeStatus, Cost, RunConfig, VerifierStatus
+
+
+# Numeric value keys are the unit-bearing keys listed in docs/interfaces.md.
+_NUMERIC_KEYS = frozenset({
+    "dE_ev_per_atom", "dE_mlip_minus_mp_ev_per_atom", "tammann_a_c",
+    "tammann_b_c", "decomposes_at_c", "volatile_above_c",
+})
+
+
+def _forbidden_key(key: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", "_", key.lower()).strip("_")
+    return (normalized in {"category", "reacted", "reaction_category"}
+            or "xrd" in normalized or "refin" in normalized
+            or "phase_weight" in normalized or "phaseweight" in normalized
+            or "reviewer_annotation" in normalized)
 
 
 class Board(Protocol):
@@ -23,8 +39,9 @@ def verify(
     ``requests`` must be the complete compute log for this run and item, and
     ``item_cost`` the cumulative cost for the item, including this artifact.
     Without these inputs and the run config, acceptance cannot be established.
-    Numerical values without a matching compute-result key are inconclusive:
-    other documented tools have no result lookup in the board contract.
+    Numerical value keys map to identical keys in every cited compute result.
+    Values without a matching result key are inconclusive: other documented
+    tools have no result lookup in the board contract.
     """
     errors: list[str] = []
     unknown: list[str] = []
@@ -51,6 +68,11 @@ def verify(
             elif reference not in accepted:
                 errors.append(f"Claim {index}: unknown or unaccepted evidence: {reference}")
 
+    # Check keys before inspecting values, so forbidden fields are never read.
+    forbidden = {key for key in artifact.values if _forbidden_key(key)}
+    for key in sorted(forbidden):
+        errors.append(f"Forbidden value key: {key}")
+
     cited: list[ComputeRequest] = []
     if requests is None:
         unknown.append("compute request log unavailable")
@@ -62,6 +84,8 @@ def verify(
             if request.request_id in by_id:
                 errors.append(f"Duplicate request ID: {request.request_id}")
             by_id[request.request_id] = request
+        if len(set(artifact.compute_requests)) != len(artifact.compute_requests):
+            errors.append("Duplicate cited compute request")
         for request_id in artifact.compute_requests:
             request = by_id.get(request_id)
             if request is None:
@@ -71,8 +95,14 @@ def verify(
                 if request.status not in (ComputeStatus.ok, ComputeStatus.cached):
                     errors.append(f"Unusable compute request: {request_id}")
 
-    for key, value in artifact.values.items():
+    for key in artifact.values:
+        if key in forbidden:
+            continue
+        value = artifact.values[key]
         if isinstance(value, (float, int)) and not isinstance(value, bool):
+            if key not in _NUMERIC_KEYS:
+                errors.append(f"Undocumented numeric value key: {key}")
+                continue
             if not math.isfinite(value):
                 errors.append(f"Non-finite value: {key}")
                 continue
@@ -82,6 +112,14 @@ def verify(
             elif any(isinstance(source, bool) or not isinstance(source, (int, float))
                      or not math.isfinite(source) or source != value for source in sources):
                 errors.append(f"Numeric value differs from compute result: {key}")
+
+    if requests is not None and len(cited) == len(artifact.compute_requests):
+        charges = [request.compute_units for request in cited]
+        if (all(math.isfinite(unit) and unit >= 0 for unit in charges)
+                and math.isfinite(artifact.cost.compute_units)
+                and not math.isclose(artifact.cost.compute_units, math.fsum(charges),
+                                     rel_tol=1e-9, abs_tol=1e-12)):
+            errors.append("Artifact compute cost disagrees with cited request charges")
 
     if config is None or item_cost is None:
         unknown.append("run config or cumulative item cost unavailable")
