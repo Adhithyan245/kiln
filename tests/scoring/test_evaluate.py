@@ -5,7 +5,13 @@ import math
 import pytest
 
 from kiln.schemas import Category, ComputeRequest, Item, Label, Prediction, ReviewFlag, ReviewReason
-from kiln.scoring.evaluate import HARD_SUBSET_FORMULA_RULES, EvaluationLockedError, evaluate, formula_triggers
+from kiln.scoring.evaluate import (
+    HARD_SUBSET_FORMULA_RULES,
+    EvaluationLockedError,
+    evaluate,
+    formula_triggers,
+    hard_subset_definition_sha256,
+)
 
 
 def fixture(tmp_path):
@@ -190,8 +196,11 @@ def hard_fixture(tmp_path, formulas=None):
 
 
 def run_hard(path, items, labels, margins, threshold=THRESHOLD):
+    """Evaluate with the hard-subset definition posted first, as a real caller must."""
+    posted = hard_subset_definition_sha256(items, margins, threshold)
     return evaluate(path, items, lambda: labels, verify_posted_hash=lambda _: True,
-                    hard_subset_margins=margins, hard_subset_margin_threshold_ev_per_atom=threshold)
+                    hard_subset_margins=margins, hard_subset_margin_threshold_ev_per_atom=threshold,
+                    verify_posted_hard_subset_hash=lambda digest: digest == posted)
 
 
 def test_hard_subset_buckets_every_item_and_reports_the_same_metrics(tmp_path):
@@ -227,6 +236,9 @@ def test_hard_subset_buckets_every_item_and_reports_the_same_metrics(tmp_path):
     assert set(hard_subset["formula_triggers"]) == {f for item in items for f in (item.precursor_a, item.precursor_b)}
     assert hard_subset["definition"]["margin_threshold_ev_per_atom"] == THRESHOLD
     assert hard_subset["definition"]["formula_rules"] == dict(HARD_SUBSET_FORMULA_RULES)
+    assert hard_subset["definition_sha256"] == hard_subset_definition_sha256(items, margins, THRESHOLD)
+    assert "verified as posted" in hard_subset["definition"]["commitment"]
+    assert hard_subset["definition"]["version"] == "kiln.hard_subset.v1"
 
 
 def test_hard_subset_leaves_all_pairs_results_unchanged(tmp_path):
@@ -243,6 +255,71 @@ def test_hard_subset_still_needs_the_posted_hash(tmp_path):
     path, items, labels, margins = hard_fixture(tmp_path)
     with pytest.raises(EvaluationLockedError):
         evaluate(path, items, no_labels, hard_subset_margins=margins, hard_subset_margin_threshold_ev_per_atom=THRESHOLD)
+
+
+def test_unposted_hard_subset_definition_blocks_label_loading(tmp_path):
+    path, items, _, margins = hard_fixture(tmp_path)
+    def broken(digest):
+        raise RuntimeError("unavailable")
+    for verify in (None, lambda digest: False, lambda digest: "yes", broken):
+        with pytest.raises(EvaluationLockedError, match="[Hh]ard-subset definition"):
+            evaluate(path, items, no_labels, verify_posted_hash=lambda _: True,
+                     hard_subset_margins=margins, hard_subset_margin_threshold_ev_per_atom=THRESHOLD,
+                     verify_posted_hard_subset_hash=verify)
+
+
+def test_re_chosen_threshold_margins_or_formulas_do_not_match_the_posted_definition(tmp_path):
+    # Threshold shopping: post one definition, then try to evaluate with another.
+    path, items, labels, margins = hard_fixture(tmp_path)
+    posted = {hard_subset_definition_sha256(items, margins, THRESHOLD)}
+    def verify(digest):
+        return digest in posted
+    result = evaluate(path, items, lambda: labels, verify_posted_hash=lambda _: True,
+                      hard_subset_margins=margins, hard_subset_margin_threshold_ev_per_atom=THRESHOLD,
+                      verify_posted_hard_subset_hash=verify)
+    assert result["hard_subset"]["definition_sha256"] in posted
+    renamed = [items[0].model_copy(update={"precursor_b": "SynZ"}), *items[1:]]
+    for changed_items, changed_margins, threshold in (
+        (items, margins, THRESHOLD * 2),
+        (items, {**margins, "c": 0.0625}, THRESHOLD),
+        (items, {**margins, "d": 0.5}, THRESHOLD),
+        (renamed, margins, THRESHOLD),
+    ):
+        with pytest.raises(EvaluationLockedError):
+            evaluate(path, changed_items, no_labels, verify_posted_hash=lambda _: True,
+                     hard_subset_margins=changed_margins, hard_subset_margin_threshold_ev_per_atom=threshold,
+                     verify_posted_hard_subset_hash=verify)
+
+
+def test_definition_digest_is_canonical_and_validated(tmp_path):
+    _, items, _, margins = hard_fixture(tmp_path)
+    digest = hard_subset_definition_sha256(items, margins, THRESHOLD)
+    assert len(digest) == 64 and int(digest, 16) >= 0
+    assert hard_subset_definition_sha256(list(reversed(items)), dict(reversed(list(margins.items()))), THRESHOLD) == digest
+    assert hard_subset_definition_sha256(items, {**margins, "a": 1}, THRESHOLD) == hard_subset_definition_sha256(items, {**margins, "a": 1.0}, THRESHOLD)
+    with pytest.raises(ValueError, match="finite number or None"):
+        hard_subset_definition_sha256(items, {**margins, "a": float("nan")}, THRESHOLD)
+    with pytest.raises(ValueError, match="supplied together"):
+        hard_subset_definition_sha256(items, margins, None)
+    with pytest.raises(ValueError, match="at least one item"):
+        hard_subset_definition_sha256([], {}, THRESHOLD)
+
+
+def test_hard_subset_verifier_without_a_definition_is_a_wiring_error(tmp_path):
+    path, items, _, _ = hard_fixture(tmp_path)
+    with pytest.raises(ValueError, match="without a hard-subset definition"):
+        evaluate(path, items, no_labels, verify_posted_hash=lambda _: True, verify_posted_hard_subset_hash=lambda _: True)
+
+
+def test_each_verifier_sees_its_own_digest(tmp_path):
+    path, items, labels, margins = hard_fixture(tmp_path)
+    seen = {}
+    evaluate(path, items, lambda: labels,
+             verify_posted_hash=lambda digest: seen.setdefault("predictions", digest) is not None,
+             hard_subset_margins=margins, hard_subset_margin_threshold_ev_per_atom=THRESHOLD,
+             verify_posted_hard_subset_hash=lambda digest: seen.setdefault("hard_subset", digest) is not None)
+    assert seen == {"predictions": hashlib.sha256(path.read_bytes()).hexdigest(),
+                    "hard_subset": hard_subset_definition_sha256(items, margins, THRESHOLD)}
 
 
 def test_margin_threshold_boundary_is_strict(tmp_path):

@@ -15,8 +15,14 @@ accounting (totals, per tier, per tier and status). Bootstrap intervals and
 A ``hard_subset`` slice is reported next to the all-pairs metrics, never
 instead of them, when the caller supplies a per-item thermodynamic-competition
 margin (computed upstream, e.g. by the B60meV baseline; None when unknown) and a
-margin threshold. Every item goes into exactly one bucket, decided before labels
-are loaded and from margins and formula text only:
+margin threshold. Every item goes into exactly one bucket, from margins and
+formula text only. The definition is committed like the predictions: its
+SHA-256 (``hard_subset_definition_sha256``, over a canonical JSON of the
+threshold, the rules and every item's formulas and margin) must be confirmed as
+independently posted by a caller-supplied ``verify_posted_hard_subset_hash``
+before labels are loaded, so the threshold and margins cannot be re-chosen
+after seeing per-bucket metrics. Integrators bind that verifier to the posting
+contract, as for predictions. The buckets are:
 
 - ``hard``: the margin is known and below the threshold, or a precursor formula
   matches a carbonate, hydroxide or ammonium rule (``HARD_SUBSET_FORMULA_RULES``);
@@ -42,7 +48,7 @@ from kiln.schemas import Category, ComputeRequest, ComputeTier, Item, Label, Pre
 
 
 class EvaluationLockedError(RuntimeError):
-    """The prediction commitment could not be independently verified."""
+    """A posted commitment (predictions or hard-subset definition) could not be independently verified."""
 
 
 # ---------- Hard subset (formula text and caller-supplied margins only) ----------
@@ -71,6 +77,7 @@ _FORMULA_PATTERNS = {name: re.compile(pattern) for name, pattern in HARD_SUBSET_
 _SUBSCRIPT_DIGITS = str.maketrans("₀₁₂₃₄₅₆₇₈₉", "0123456789")
 HARD_SUBSET_TRIGGERS = (HARD_SUBSET_MARGIN_TRIGGER, *HARD_SUBSET_FORMULA_RULES)
 HARD_SUBSET_BUCKETS = ("hard", "easy", "unknown")
+HARD_SUBSET_DEFINITION_VERSION = "kiln.hard_subset.v1"  # bump when the bucket rules or canonical form change
 
 
 def formula_triggers(formula: str) -> tuple[str, ...]:
@@ -85,18 +92,12 @@ def _is_real(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
-def _hard_subset_assign(
+def _hard_subset_inputs(
     item_map: dict[str, Item],
     margins: Mapping[str, float | None] | None,
     threshold: float | None,
-) -> dict[str, Any] | None:
-    """Validate the hard-subset inputs and put every item in one bucket.
-
-    Runs before labels are loaded, so labels cannot influence the assignment and
-    bad inputs never cause a label read. Returns None when neither input is given.
-    """
-    if margins is None and threshold is None:
-        return None
+) -> tuple[dict[str, float | None], float]:
+    """Validate the hard-subset inputs; return margins as float or None, and the threshold as float."""
     if margins is None or threshold is None:
         raise ValueError(
             "hard_subset_margins and hard_subset_margin_threshold_ev_per_atom must be supplied together"
@@ -121,6 +122,61 @@ def _hard_subset_assign(
                 f"hard-subset margin for {item_id!r} is negative ({margin!r}); a competition margin "
                 "(dE_competing - dE_best) is nonnegative by construction"
             )
+    normalized = {item_id: None if margins[item_id] is None else float(margins[item_id]) for item_id in item_map}
+    return normalized, float(threshold)
+
+
+def _hard_subset_canonical(item_map: dict[str, Item], margins: dict[str, float | None], threshold: float) -> bytes:
+    """Canonical JSON of everything that decides the buckets: the definition
+    version, threshold, margin rule, formula rules and text handling, and every
+    item's ID, precursor formulas and margin, sorted by item ID."""
+    payload = {
+        "version": HARD_SUBSET_DEFINITION_VERSION,
+        "margin_threshold_ev_per_atom": threshold,
+        "margin_rule": "hard when margin_ev_per_atom is known and < margin_threshold_ev_per_atom",
+        "formula_rules": dict(HARD_SUBSET_FORMULA_RULES),
+        "formula_text": "case-sensitive; Unicode subscript digits read as ASCII digits",
+        "items": [
+            [item_id, item_map[item_id].precursor_a, item_map[item_id].precursor_b, margins[item_id]]
+            for item_id in sorted(item_map)
+        ],
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode("ascii")
+
+
+def hard_subset_definition_sha256(
+    items: Iterable[Item],
+    margins: Mapping[str, float | None],
+    threshold: float,
+) -> str:
+    """SHA-256 of the canonical hard-subset definition, to post before unblinding.
+
+    Uses the same validation and canonical form as ``evaluate``, so the digest a
+    caller posts is the one ``evaluate`` asks ``verify_posted_hard_subset_hash``
+    to confirm. Input order and int-versus-float spelling of a margin do not
+    change it; a changed threshold, margin, formula, item or rule does.
+    """
+    item_map = _unique(items, "item")
+    if not item_map:
+        raise ValueError("at least one item is required")
+    normalized, threshold_value = _hard_subset_inputs(item_map, margins, threshold)
+    return hashlib.sha256(_hard_subset_canonical(item_map, normalized, threshold_value)).hexdigest()
+
+
+def _hard_subset_assign(
+    item_map: dict[str, Item],
+    margins: Mapping[str, float | None] | None,
+    threshold: float | None,
+) -> dict[str, Any] | None:
+    """Validate the hard-subset inputs, digest the definition and put every item in one bucket.
+
+    Runs before labels are loaded, so labels cannot influence the assignment and
+    bad inputs never cause a label read. Returns None when neither input is given.
+    """
+    if margins is None and threshold is None:
+        return None
+    margins, threshold = _hard_subset_inputs(item_map, margins, threshold)
+    digest = hashlib.sha256(_hard_subset_canonical(item_map, margins, threshold)).hexdigest()
     formula_table = {
         formula: list(formula_triggers(formula))
         for formula in sorted({f for item in item_map.values() for f in (item.precursor_a, item.precursor_b)})
@@ -135,10 +191,26 @@ def _hard_subset_assign(
         assignments.append({
             "item_id": item_id,
             "bucket": bucket,
-            "margin_ev_per_atom": None if margin is None else float(margin),
+            "margin_ev_per_atom": margin,
             "triggers": triggers,
         })
-    return {"threshold": float(threshold), "assignments": assignments, "formula_triggers": formula_table}
+    return {"threshold": threshold, "sha256": digest, "assignments": assignments, "formula_triggers": formula_table}
+
+
+def _verify_hard_subset_commitment(plan: dict[str, Any] | None, verify: Callable[[str], bool] | None) -> None:
+    """Fail closed unless the hard-subset definition digest is independently
+    verified as posted, so the threshold and margins cannot be re-chosen after
+    seeing per-bucket metrics."""
+    if plan is None:
+        if verify is not None:
+            raise ValueError("verify_posted_hard_subset_hash was supplied without a hard-subset definition")
+        return
+    try:
+        verified = verify is not None and verify(plan["sha256"]) is True
+    except Exception as exc:
+        raise EvaluationLockedError("Unable to verify posted hard-subset definition hash") from exc
+    if not verified:
+        raise EvaluationLockedError("Hard-subset definition hash has not been independently verified as posted")
 
 
 def _hard_subset_report(plan: dict[str, Any] | None, rows: dict[str, tuple[Prediction, Label]]) -> dict[str, Any]:
@@ -154,7 +226,13 @@ def _hard_subset_report(plan: dict[str, Any] | None, rows: dict[str, tuple[Predi
     hard = [a for a in assignments if a["bucket"] == "hard"]
     return {
         "available": True,
+        "definition_sha256": plan["sha256"],
         "definition": {
+            "version": HARD_SUBSET_DEFINITION_VERSION,
+            "commitment": (
+                "definition_sha256 (canonical JSON of the threshold, rules and every item's formulas and margin) "
+                "was verified as posted by verify_posted_hard_subset_hash before labels were loaded"
+            ),
             "margin_threshold_ev_per_atom": plan["threshold"],
             "hard": "margin_ev_per_atom known and < margin_threshold_ev_per_atom, or any precursor formula matches a formula rule",
             "easy": "margin_ev_per_atom known and >= margin_threshold_ev_per_atom, and no formula rule matches",
@@ -287,6 +365,7 @@ def evaluate(
     bootstrap_seed: int = 0,
     hard_subset_margins: Mapping[str, float | None] | None = None,
     hard_subset_margin_threshold_ev_per_atom: float | None = None,
+    verify_posted_hard_subset_hash: Callable[[str], bool] | None = None,
 ) -> dict[str, Any]:
     """Evaluate one frozen JSONL run after independent confirmation of its hash.
 
@@ -299,7 +378,10 @@ def evaluate(
     eV/atom (None when unknown); ``hard_subset_margin_threshold_ev_per_atom`` has
     no default. Supply both for the ``hard_subset`` slice, or neither, in which
     case the slice is reported as unavailable. Both are checked, and every item
-    assigned to a bucket, before labels are loaded.
+    assigned to a bucket, before labels are loaded. With the slice requested,
+    ``verify_posted_hard_subset_hash`` must return the literal True for the
+    definition digest (see ``hard_subset_definition_sha256``) or
+    ``EvaluationLockedError`` is raised and labels are never loaded.
     """
     if not isinstance(bootstrap_samples, int) or isinstance(bootstrap_samples, bool) or bootstrap_samples < 0:
         raise ValueError("bootstrap_samples must be a nonnegative integer")
@@ -350,6 +432,7 @@ def evaluate(
         if not math.isfinite(request.compute_units) or request.compute_units < 0 or not math.isfinite(request.gpu_seconds) or request.gpu_seconds < 0:
             raise ValueError("request costs must be finite and nonnegative")
     hard_plan = _hard_subset_assign(item_map, hard_subset_margins, hard_subset_margin_threshold_ev_per_atom)
+    _verify_hard_subset_commitment(hard_plan, verify_posted_hard_subset_hash)
     labels = _unique(load_labels(), "label")
     if set(labels) != set(pred):
         raise ValueError("labels and predictions must contain the same item IDs")
