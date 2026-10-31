@@ -68,3 +68,19 @@ def test_command_writes_the_proposal(tmp_path: Path) -> None:
     assert saved["measurements"]["bounded_relaxation"]["status"] == {"ok": 18, "not_converged": 2}
     assert saved["measured_on"]["host"] == "test-host"
     assert propose(SUMMARY, hours=11)["night2"]["assumptions"].startswith("369 held-out items")
+
+
+def test_cache_aware_estimate_counts_one_calculation_per_pair_and_tier() -> None:
+    fit = night2_fit(2.0, 7.3, hours=11, workers=1, items=346,
+                     tier_p90_s={"single_point": 3.0, "bounded_relaxation": 30.0, "cached_lookup": 0.0})
+    assert fit["main_run_with_cache_gpu_hours_p90"] == pytest.approx(346 * 33.0 / 3600, abs=0.01)
+    assert fit["main_run_fits_with_cache"] is True
+    assert fit["assumptions"].startswith("346 held-out items")
+
+
+def test_items_option_reaches_the_proposal(tmp_path: Path) -> None:
+    summary = tmp_path / "profile.json"
+    summary.write_text(json.dumps(SUMMARY))
+    out = tmp_path / "p.json"
+    assert main(["--summary", str(summary), "--hours", "11", "--items", "346", "--out", str(out)]) == 0
+    assert json.loads(out.read_text())["night2"]["assumptions"].startswith("346 held-out items")

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
@@ -77,13 +78,18 @@ def propose_budget(prices: Mapping[str, float]) -> float:
 
 def night2_fit(single_point_median_s: float, budget_units: float, *, hours: float, workers: int = 1,
                items: int = HELDOUT_ITEMS, conditions: int = CONDITIONS, seeds: int = SEEDS,
-               margin: float = 0.7) -> dict[str, Any]:
-    """Worst-case GPU hours for the main run (every item spends its full budget) against the time
-    available; only `margin` of it is planned for, leaving room for retries and the night runner."""
+               margin: float = 0.7, tier_p90_s: Mapping[str, float] | None = None) -> dict[str, Any]:
+    """GPU hours for the main run against the time available (only `margin` of it is planned for,
+    leaving room for retries and the night runner).
+
+    Worst case: every item, condition and seed spends its full budget on fresh calculations.
+    With the result cache: identical calculations are computed once (every request is still
+    charged in full), and a pair's tier request is the same in every condition and seed, so each
+    pair needs at most one real calculation per tier; timed at the p90 GPU-seconds."""
     per_item_s = budget_units * single_point_median_s
     needed_h = items * conditions * seeds * per_item_s / 3600
     usable_h = hours * workers * margin
-    return {
+    out = {
         "worst_case_gpu_seconds_per_item": round(per_item_s, 2),
         "main_run_worst_case_gpu_hours": round(needed_h, 2),
         "usable_gpu_hours": round(usable_h, 2),
@@ -92,15 +98,21 @@ def night2_fit(single_point_median_s: float, budget_units: float, *, hours: floa
         "assumptions": f"{items} held-out items x {conditions} conditions x {seeds} seeds; {hours} h x {workers} "
                        f"GPU worker(s), {int(margin * 100)}% of it planned for",
     }
+    if tier_p90_s:
+        cached_h = items * math.fsum(v for v in tier_p90_s.values() if v) / 3600
+        out |= {"main_run_with_cache_gpu_hours_p90": round(cached_h, 2),
+                "main_run_fits_with_cache": cached_h <= usable_h}
+    return out
 
 
 def propose(summary: Mapping[str, Any], *, hours: float, workers: int = 1, floor: float = FLOOR_UNITS,
-            source: str = "") -> dict[str, Any]:
+            source: str = "", items: int = HELDOUT_ITEMS) -> dict[str, Any]:
     tiers = summary["tiers"]
     prices = propose_prices(tiers, floor)
     budget = propose_budget(prices)
     sp = float(tiers[ComputeTier.single_point.value]["median_gpu_seconds"])
-    fit = night2_fit(sp, budget, hours=hours, workers=workers)
+    p90 = {t: float(s.get("p90_gpu_seconds") or 0.0) for t, s in tiers.items()}
+    fit = night2_fit(sp, budget, hours=hours, workers=workers, items=items, tier_p90_s=p90)
     return {
         "status": "PROPOSAL (Adhi, compute science). Hemanath freezes prices and budget in protocol.md at code freeze.",
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -120,10 +132,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--hours", type=float, required=True, help="GPU hours available for Night 2")
     parser.add_argument("--workers", type=int, default=1, help="GPU workers in Night 2 (GB10 + Brev)")
     parser.add_argument("--floor", type=float, default=FLOOR_UNITS)
+    parser.add_argument("--items", type=int, default=HELDOUT_ITEMS, help="held-out items in the main run")
     parser.add_argument("--out", type=Path, default=PROPOSAL_PATH)
     args = parser.parse_args(argv)
     summary = json.loads(args.summary.read_text(encoding="utf-8"))
-    proposal = propose(summary, hours=args.hours, workers=args.workers, floor=args.floor, source=args.summary.as_posix())
+    proposal = propose(summary, hours=args.hours, workers=args.workers, floor=args.floor,
+                       source=args.summary.as_posix(), items=args.items)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(proposal, indent=2), encoding="utf-8")
     print(json.dumps({k: proposal[k] for k in ("compute_unit", "tier_prices", "max_compute_units_per_item", "night2")},

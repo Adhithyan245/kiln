@@ -50,6 +50,9 @@ __all__ = ["CalculatorFactory", "LocalBackend", "StructureResult", "TierRun", "b
            "first_calcs", "mace_calculator", "run_tier", "single_point", "structure_from_cache"]
 
 FIRST_CALCS_PATH = Path("cache") / "first_calcs.json"
+# Molecules that are gases at furnace conditions; Materials Project stores them as molecular solids.
+GAS_MOLECULES = frozenset({"O2", "N2", "H2", "F2", "Cl2", "CO2", "CO", "H2O", "NH3", "CH4", "SO2", "SO3",
+                           "NO", "NO2", "N2O", "H2S", "HCl", "HF"})
 TIER_SETTINGS_PATH = Path("env") / "gb10" / "tier_settings.json"
 
 CalculatorFactory = Callable[[dict[str, Any]], Any]   # settings -> ASE calculator
@@ -140,7 +143,8 @@ def _phase_set(a: str, b: str, settings: dict[str, Any], cache_dir: Path) -> lis
 def _phase_selection(a: str, b: str, settings: dict[str, Any],
                      cache_dir: Path) -> tuple[list[ComputedEntry], set[str], set[str]]:
     """The phases the a-b reaction energy depends on, not the whole chemical system.
-    Returns (phases, required ids, elemental-reference ids); the rest are near-hull competitors.
+    Returns (phases, required ids, single-point-only ids: element references and gas molecules);
+    the rest are near-hull competitors.
 
     The interface reaction energy between a and b depends only on the convex hull along the a-b
     mixing line. So the set is: (1) the stable phases every a-b mixture decomposes into, at each
@@ -173,10 +177,13 @@ def _phase_selection(a: str, b: str, settings: dict[str, Any],
         if not matching:
             raise ValueError(f"no Materials Project entry for precursor {formula}")
         add(min(matching, key=lambda e: e.energy_per_atom))
-    required = set(keep)
     for e in pd.el_refs.values():                                  # (3) elemental references
         add(e)
-    elements = {str(e.entry_id) for e in pd.el_refs.values()} - required
+    # Element references and gas molecules stored as molecular solids (O2, CO2, H2O, ...) are never
+    # relaxed: a variable-cell relaxation of a molecular solid doesn't converge and isn't meaningful.
+    elements = {str(e.entry_id) for e in keep.values()
+                if len(e.composition.elements) == 1 or e.composition.reduced_formula in GAS_MOLECULES}
+    required = set(keep) - {str(e.entry_id) for e in pd.el_refs.values()} - elements
     competitors = sorted((e for e in entries if str(e.entry_id) not in keep
                           and pd.get_e_above_hull(e) <= window and _on_join(e.composition, ca, cb)),
                          key=pd.get_e_above_hull)
