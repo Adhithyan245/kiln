@@ -41,7 +41,14 @@ class ResultCache:
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(entry, f, sort_keys=True, allow_nan=False)
-            os.replace(tmp, path)
+            try:
+                os.replace(tmp, path)
+            except PermissionError:
+                # Windows refuses to replace a file another process has open. Two writers of
+                # one key both hold a valid `ok` result for it, so the first one wins.
+                if not path.exists():
+                    raise
+                Path(tmp).unlink(missing_ok=True)
         except BaseException:
             Path(tmp).unlink(missing_ok=True)
             raise
