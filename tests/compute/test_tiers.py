@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -148,3 +149,78 @@ def test_missing_cache_becomes_a_logged_failure_through_the_client(tmp_path: Pat
                              {"precursor_a": "SrO", "precursor_b": "TiO2"}, budget)
     assert ok.status == ComputeStatus.ok and ok.result["dE_ev_per_atom"] == pytest.approx(-0.04)
     assert missing.status == ComputeStatus.failed and "MissingCache" in str(missing.result["error"])
+
+
+# ---------- first calculations on a new host (Task 1) ----------
+
+from kiln.compute import tiers as tiers_module
+from kiln.compute.tiers import first_calcs, main, structure_from_cache
+
+FIRST_FIELDS = {"status", "energy_ev_per_atom", "max_force_ev_per_a", "max_stress_ev_per_a3",
+                "wall_s", "gpu_seconds"}
+
+
+class CrashingMLIP(Calculator):
+    implemented_properties = ["energy", "forces", "stress"]
+
+    def calculate(self, atoms=None, properties=("energy",), system_changes=all_changes) -> None:
+        raise RuntimeError("CUDA out of memory")
+
+
+def test_structure_from_cache_picks_lowest_energy_structure(cache_dir: Path) -> None:
+    entry = structure_from_cache("TiO2", cache_dir)   # only Ca-O-Ti.json is cached, as on the GB10
+    tio2 = [e for e in ca_ti_o_entries() if e.composition.reduced_formula == "TiO2"]
+    assert entry.composition.reduced_formula == "TiO2"
+    assert entry.energy_per_atom == min(e.energy_per_atom for e in tio2)
+
+
+def test_structure_from_cache_unknown_formula_raises(cache_dir: Path) -> None:
+    with pytest.raises((ValueError, mp.MissingCache)):
+        structure_from_cache("Li2O", cache_dir)
+
+
+def test_first_calcs_converged_records_every_field(cache_dir: Path) -> None:
+    entry = structure_from_cache("TiO2", cache_dir)
+    record = first_calcs(entry.structure, {**RELAX, "device": "cpu"}, source="test",
+                         calculator_factory=factory(FakeMLIP()))
+    sp, relax = record["single_point"], record["bounded_relaxation"]
+    assert FIRST_FIELDS <= sp.keys() and FIRST_FIELDS | {"steps", "max_steps"} <= relax.keys()
+    assert sp["status"] == relax["status"] == "ok"
+    assert sp["energy_ev_per_atom"] == pytest.approx(entry.uncorrected_energy_per_atom)
+    assert relax["steps"] <= RELAX["max_steps"]
+    assert record["cpu_dry_run"] is True and sp["gpu_seconds"] == relax["gpu_seconds"] == 0.0
+    assert record["formula"] == "TiO2" and record["n_atoms"] == len(entry.structure)
+    assert record["settings"]["fmax_ev_per_a"] == 0.05 and record["settings"]["stress_tol_ev_per_a3"] == 0.001
+
+
+def test_first_calcs_reports_not_converged_honestly(cache_dir: Path) -> None:
+    entry = structure_from_cache("TiO2", cache_dir)
+    record = first_calcs(entry.structure, {**RELAX, "device": "cpu", "max_steps": 1}, source="test",
+                         calculator_factory=factory(FakeMLIP(stress=0.01)))
+    relax = record["bounded_relaxation"]
+    assert relax["status"] == "not_converged"
+    assert relax["steps"] == 1 and relax["max_steps"] == 1
+    assert relax["max_stress_ev_per_a3"] == pytest.approx(0.01)   # final stress is kept, not hidden
+
+
+def test_first_calcs_records_a_crash_as_failed(cache_dir: Path) -> None:
+    entry = structure_from_cache("TiO2", cache_dir)
+    record = first_calcs(entry.structure, {**RELAX, "device": "cpu"}, source="test",
+                         calculator_factory=factory(CrashingMLIP()))
+    for name in ("single_point", "bounded_relaxation"):
+        assert record[name]["status"] == "failed"
+        assert "CUDA out of memory" in record[name]["error"]
+
+
+def test_first_calcs_command_writes_json(tmp_path: Path, cache_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = tmp_path / "tier_settings.json"
+    settings.write_text(json.dumps({"bounded_relaxation": {**RELAX, "device": "cuda", "dtype": "float64"}}))
+    monkeypatch.setattr(tiers_module, "mace_calculator", factory(FakeMLIP()))
+    out = tmp_path / "first_calcs.json"
+    code = main(["first-calcs", "--formula", "TiO2", "--cache-dir", str(cache_dir), "--settings", str(settings),
+                 "--device", "cpu", "--out", str(out)])
+    assert code == 0
+    saved = json.loads(out.read_text())
+    assert saved["source"].startswith("materials_project:")
+    assert saved["device"] == "cpu" and saved["cpu_dry_run"] is True
+    assert saved["single_point"]["status"] == "ok" and saved["bounded_relaxation"]["status"] == "ok"

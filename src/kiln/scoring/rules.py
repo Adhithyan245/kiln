@@ -41,7 +41,11 @@ Text = Annotated[str, AfterValidator(_not_blank)]
 class _Frozen(BaseModel):
     # Strict: no bool-as-number or string coercion. Python input needs tuples
     # and enum members; load a JSON rule file with model_validate_json.
-    model_config = ConfigDict(frozen=True, strict=True, extra="forbid", allow_inf_nan=False)
+    # model_construct() and model_copy(update=...) skip validation, so an
+    # existing instance is validated again, into a new copy, whenever it is
+    # passed back in; a subclass instance comes back as the base class.
+    model_config = ConfigDict(frozen=True, strict=True, extra="forbid", allow_inf_nan=False,
+                              revalidate_instances="always")
 
 
 class EvidenceSource(_Frozen):
@@ -150,7 +154,12 @@ class ScoringRules(_Frozen):
         return self
 
     def digest(self) -> str:
-        """SHA-256 of the canonical JSON form; equal rule sets share a digest."""
-        canonical = json.dumps(self.model_dump(mode="json"), sort_keys=True,
+        """SHA-256 of the canonical JSON form; equal rule sets share a digest.
+
+        The instance is validated first, so an unvalidated one (built with
+        model_construct or model_copy(update=...)) raises instead of hashing.
+        """
+        valid = ScoringRules.model_validate(self)
+        canonical = json.dumps(valid.model_dump(mode="json"), sort_keys=True,
                                separators=(",", ":"), ensure_ascii=True, allow_nan=False)
         return hashlib.sha256(canonical.encode("ascii")).hexdigest()

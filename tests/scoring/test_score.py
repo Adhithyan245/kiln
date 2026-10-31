@@ -1,9 +1,14 @@
 """Synthetic evidence tests; no experimental outcomes are used."""
+import hashlib
+import json
 import math
+import random
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from kiln.board import Board
+from kiln.budget import Budget, BudgetExceeded
 from kiln.schemas import (
     Artifact,
     Category,
@@ -36,6 +41,7 @@ from kiln.scoring.score import (
     provisional,
     score,
 )
+from kiln.verifier import verify
 
 
 @pytest.fixture
@@ -223,6 +229,126 @@ def test_engine_wraps_verifier_errors_and_passes_the_digest():
         ScoringEngine(rules.model_dump(), config, verify_frozen_rules=lambda d: True)
     with pytest.raises(TypeError):
         ScoringEngine(rules, config.model_dump(), verify_frozen_rules=lambda d: True)
+
+
+# ---------- Rule boundary: unvalidated, subclassed and mutated rules ----------
+
+def unvalidated(model, **update):
+    return model.model_copy(update=update)  # skips validation, like model_construct()
+
+
+def invalid_rule_sets():
+    valid = synthetic_rules()
+    energy, tammann = valid.features
+    return {
+        "undefined term feature": unvalidated(valid, p_react=unvalidated(
+            valid.p_react, terms=(Term(feature="nope", weight=1.0),))),
+        "unknown link": unvalidated(valid, p_react=unvalidated(valid.p_react, link="probit")),
+        "bool weight": unvalidated(valid, p_react=unvalidated(
+            valid.p_react, terms=(Term.model_construct(feature="energy", weight=True),))),
+        "string threshold": unvalidated(valid, category_rules=(CategoryRule.model_construct(
+            when=(Condition.model_construct(subject="p_react", op="ge", threshold="0.9"),), outcome=HIGH),)),
+        "NaN fallback": unvalidated(valid, features=(energy, unvalidated(tammann, fallback=float("nan")))),
+        "unknown on_multiple": unvalidated(valid, features=(energy, unvalidated(tammann, on_multiple="mean"))),
+        "duplicate feature": unvalidated(valid, features=(energy, energy)),
+        "list instead of tuple": unvalidated(valid, category_rules=list(valid.category_rules)),
+        "extra field": unvalidated(valid, note="synthetic"),
+        "missing field": ScoringRules.model_construct(
+            **{name: getattr(valid, name) for name in ScoringRules.model_fields if name != "otherwise"}),
+    }
+
+
+@pytest.mark.parametrize("name", sorted(invalid_rule_sets()))
+def test_unvalidated_rules_are_refused_before_the_verifier(name):
+    calls = []
+    config = RunConfig(run_id="run", condition="C1", seed=0, model="synthetic-model")
+    with pytest.raises(ScoringConfigurationError, match="failed validation"):
+        ScoringEngine(invalid_rule_sets()[name], config, verify_frozen_rules=lambda d: calls.append(d) or True)
+    assert calls == []
+
+
+def test_a_subclass_cannot_supply_its_own_digest():
+    valid = synthetic_rules()
+    fields = {name: getattr(valid, name) for name in ScoringRules.model_fields}
+
+    class Forged(ScoringRules):
+        def digest(self) -> str:
+            return valid.digest()
+
+    forged = Forged.model_validate(fields | {"p_react": LinearScore(intercept=-50.0, link="logistic",
+                                                                    terms=valid.p_react.terms)})
+    config = RunConfig(run_id="run", condition="C1", seed=0, model="synthetic-model")
+    seen = []
+    with pytest.raises(ScoringConfigurationError, match="not been verified"):
+        ScoringEngine(forged, config, verify_frozen_rules=lambda d: seen.append(d) or d == valid.digest())
+    assert seen == [ScoringRules.model_validate(forged).digest()] and seen[0] != valid.digest()
+    # A subclass with the attested content runs as the plain rule set.
+    engine = ScoringEngine(Forged.model_validate(fields), config,
+                           verify_frozen_rules=lambda d: d == valid.digest())
+    assert type(engine.rules) is ScoringRules and engine.rules == valid
+
+
+def test_engine_keeps_a_private_snapshot_of_the_attested_rules(item, evidence):
+    rules = synthetic_rules()
+    engine = engine_for(rules)
+    requests = [make_request(1)]
+    before = (engine.provisional(item, evidence),
+              engine.score(item, evidence, requests, [], cost=cost_for(requests)).model_dump_json())
+    # Frozen models refuse assignment, but object.__setattr__ gets past that.
+    object.__setattr__(rules.p_react, "intercept", -50.0)
+    object.__setattr__(rules, "category_rules", ())
+    exposed = engine.rules
+    object.__setattr__(exposed.p_react, "intercept", 50.0)
+    assert (engine.provisional(item, evidence),
+            engine.score(item, evidence, requests, [], cost=cost_for(requests)).model_dump_json()) == before
+    assert engine.rules_digest == synthetic_rules().digest() and engine.rules == synthetic_rules()
+    assert engine.rules is not engine.rules
+
+
+def legacy_digest(rules):
+    # ScoringRules.digest() as it was before rules were validated again.
+    canonical = json.dumps(rules.model_dump(mode="json"), sort_keys=True,
+                           separators=(",", ":"), ensure_ascii=True, allow_nan=False)
+    return hashlib.sha256(canonical.encode("ascii")).hexdigest()
+
+
+EDGE_NUMBERS = (-0.0, 0.0, 5e-324, -5e-324, 1e-300, 0.1, 1, 1.7976931348623157e308, -1.7976931348623157e308)
+
+
+def random_rules(rng):
+    def number():
+        return rng.choice(EDGE_NUMBERS) if rng.random() < 0.5 else rng.uniform(-1e3, 1e3)
+    energy, tammann = synthetic_rules().features
+    tammann = Feature(name="tammann", sources=tammann.sources, fallback=rng.choice((None, number())),
+                      on_multiple=rng.choice(("require_equal", "latest_created")))
+    terms = (Term(feature="energy", weight=number()), Term(feature="tammann", weight=number()))
+    when = tuple(Condition(subject=rng.choice(("p_react", "energy", "tammann")),
+                           op=rng.choice(("lt", "le", "gt", "ge")), threshold=number())
+                 for _ in range(rng.randint(1, 3)))
+    reasons = tuple(rng.sample(list(ReviewReason), rng.randint(0, len(ReviewReason))))
+    return ScoringRules(
+        features=(energy, tammann),
+        p_react=LinearScore(intercept=number(), link=rng.choice(("logistic", "clip")),
+                            terms=terms[:rng.randint(0, 2)]),
+        category_rules=tuple(CategoryRule(when=when, outcome=rng.choice((HIGH, MID, LOW)))
+                             for _ in range(rng.randint(0, 2))),
+        otherwise=rng.choice((HIGH, MID, LOW)),
+        disagreement_flag_reasons=reasons,
+        applicability_flag_reasons=tuple(reversed(reasons)),
+    )
+
+
+def test_valid_rule_digests_are_unchanged():
+    # Pinned before the private snapshot was added, so attested digests still hold.
+    assert synthetic_rules().digest() == engine_for(synthetic_rules()).rules_digest \
+        == "192f985a8049a3f036f70398bc4793d7041fb37e2512e71efa820cdc3ca8c688"
+    config = RunConfig(run_id="run", condition="C1", seed=0, model="synthetic-model")
+    rng = random.Random(20261031)
+    for _ in range(500):
+        rules = random_rules(rng)
+        engine = ScoringEngine(rules, config, verify_frozen_rules=lambda d: True)
+        assert engine.rules_digest == rules.digest() == legacy_digest(rules)
+        assert engine.rules == rules
 
 
 def test_provisional_applies_configured_logistic_score(item, evidence):
@@ -468,3 +594,177 @@ def test_scoring_is_deterministic_and_detached_from_caller_config(item, evidence
     again = engine_for(synthetic_rules()).score(item, evidence, requests, [], cost=cost_for(requests))
     assert engine.score(item, evidence, requests, [], cost=cost_for(requests)).model_dump_json() \
         == first.model_dump_json() == again.model_dump_json()
+
+
+# ---------- GPU-seconds taken from the compute log ----------
+
+def test_gpu_seconds_from_log_fills_only_gpu_seconds(item, evidence):
+    requests = [make_request(1, units=1.0, gpu=0.0, status=ComputeStatus.cached),
+                make_request(2, units=3.0, gpu=12.5, status=ComputeStatus.not_converged)]
+    # Like kiln.budget.Budget.spent: compute units charged, GPU time not measured.
+    cost = Cost(compute_units=4.0, tool_calls=6, tokens_in=1200, tokens_out=300, usd=0.02)
+    engine = engine_for(synthetic_rules())
+    with pytest.raises(ValueError, match=r"cost.gpu_seconds is 0.0 but .* total 12.5"):
+        engine.score(item, evidence, requests, [], cost=cost)
+    prediction = engine.score(item, evidence, requests, [], cost=cost, gpu_seconds_from_log=True)
+    assert prediction.cost == cost.model_copy(update={"gpu_seconds": 12.5})
+    assert cost.gpu_seconds == 0.0
+    # Same prediction as the default mode given a correctly measured cost.
+    measured = engine.score(item, evidence, requests, [], cost=prediction.cost)
+    assert measured.model_dump_json() == prediction.model_dump_json()
+
+
+@pytest.mark.parametrize("gpu", [3.0, 12.5])
+def test_gpu_seconds_from_log_refuses_a_measured_value(item, evidence, gpu):
+    # A given measurement is never overwritten, even one that agrees with the log.
+    requests = [make_request(1, units=1.0, gpu=12.5)]
+    with pytest.raises(ValueError, match=rf"cost.gpu_seconds is {gpu}, .*gpu_seconds_from_log=False"):
+        engine_for(synthetic_rules()).score(item, evidence, requests, [],
+                                            cost=Cost(compute_units=1.0, gpu_seconds=gpu),
+                                            gpu_seconds_from_log=True)
+
+
+@pytest.mark.parametrize("units", [5.0, 3.0])
+def test_gpu_seconds_from_log_still_requires_a_complete_log(item, evidence, units):
+    # 5.0: a charge with no logged request (one still in flight, or never
+    # logged). 3.0: a logged request that was never charged.
+    requests = [make_request(1, units=1.0, gpu=0.0), make_request(2, units=3.0, gpu=12.5)]
+    with pytest.raises(ValueError, match=rf"cost.compute_units is {units} .* total 4.0"):
+        engine_for(synthetic_rules()).score(item, evidence, requests, [], cost=Cost(compute_units=units),
+                                            gpu_seconds_from_log=True)
+
+
+@pytest.mark.parametrize("gpu", [-1.0, float("nan"), float("inf")])
+def test_gpu_seconds_from_log_refuses_invalid_measurements(item, evidence, gpu):
+    requests = [make_request(1, units=1.0, gpu=gpu)]
+    with pytest.raises(ValueError, match="invalid compute request gpu_seconds"):
+        engine_for(synthetic_rules()).score(item, evidence, requests, [], cost=Cost(compute_units=1.0),
+                                            gpu_seconds_from_log=True)
+
+
+def test_gpu_seconds_from_log_is_exact_and_order_independent(item):
+    accepted = [make_artifact(1)]
+    requests = [make_request(seq, units=0.5, gpu=0.1) for seq in range(1, 11)]
+    engine = engine_for(synthetic_rules())
+    totals = {engine.score(item, accepted, ordered, [], cost=Cost(compute_units=5.0),
+                           gpu_seconds_from_log=True).cost.gpu_seconds
+              for ordered in (requests, requests[::-1])}
+    assert totals == {1.0}  # a naive left-to-right sum gives 0.9999999999999999
+    empty = engine.score(item, accepted, [], [], cost=Cost(), gpu_seconds_from_log=True)
+    assert empty.cost == Cost()
+
+
+def test_gpu_seconds_from_log_must_be_a_bool(item, evidence):
+    requests = [make_request(1)]
+    with pytest.raises(TypeError, match="must be a bool"):
+        engine_for(synthetic_rules()).score(item, evidence, requests, [], cost=cost_for(requests),
+                                            gpu_seconds_from_log=1)
+
+
+# ---------- Synthetic integration: real Board, Budget and verifier ----------
+# STAND-INS: kiln.compute does not exist yet, so StandInCompute charges the
+# real Budget and then logs. Its tier prices, measured GPU-seconds, results
+# and the tool values are invented test values, not proposals.
+
+RUN_ID = "SYNTHETIC-run"
+
+
+class StandInCompute:
+    """Charges the real Budget before running, then appends the request to the run's log."""
+
+    def __init__(self, board: Board, budget: Budget) -> None:
+        self.run_id = board.run_id
+        self.log_path = board.run_dir / "compute_requests.jsonl"
+        self.budget = budget
+        self.seq = 0
+
+    def request(self, item, tier, status, units, gpu, result):
+        self.budget.charge_compute(units)  # an over-limit charge is refused here and never logged
+        self.seq += 1
+        logged = ComputeRequest(request_id=f"{self.run_id}:compute:{self.seq}", run_id=self.run_id,
+                                item_id=item.item_id, agent="thermo", tier=tier, reason="synthetic",
+                                inputs={}, settings={}, cache_key=f"key{self.seq}", status=status,
+                                result=result, compute_units=units, gpu_seconds=gpu)
+        with self.log_path.open("a", encoding="utf-8") as f:
+            f.write(logged.model_dump_json() + "\n")
+        return logged
+
+    def log_for(self, item_id):
+        lines = self.log_path.read_text(encoding="utf-8").splitlines() if self.log_path.exists() else []
+        return [r for r in map(ComputeRequest.model_validate_json, lines) if r.item_id == item_id]
+
+
+@pytest.fixture
+def run(tmp_path):
+    config = RunConfig(run_id=RUN_ID, condition="C1", seed=3, model="synthetic-model",
+                       max_compute_units_per_item=5.0)
+    board = Board(tmp_path / RUN_ID)
+    budget = Budget(config)
+    return config, board, budget, StandInCompute(board, budget)
+
+
+def post_verified(board, artifact, compute, config, budget, tool_values=None):
+    board.post_artifact(artifact)
+    status, notes = verify(artifact, board, requests=compute.log_for(artifact.item_id), config=config,
+                           item_cost=budget.spent, tool_values=tool_values)
+    board.post_artifact(artifact.model_copy(update={"verifier": status, "verifier_notes": notes}))
+    return status, notes
+
+
+def thermo_step(item, board, budget, compute):
+    budget.charge_tool_call()
+    cached = compute.request(item, "cached_lookup", ComputeStatus.cached, 1.0, 0.0, {"dE_ev_per_atom": 0.9})
+    budget.charge_tool_call()
+    refined = compute.request(item, "bounded_relaxation", ComputeStatus.not_converged, 3.0, 12.5, {})
+    budget.charge_tokens(1200, 300)
+    return cached, refined, Artifact(
+        artifact_id=board.new_id("thermo"), run_id=board.run_id, item_id=item.item_id, agent="thermo",
+        type="reaction_report", values={"dE_ev_per_atom": 0.9},
+        compute_requests=[cached.request_id, refined.request_id],
+        cost=Cost(tool_calls=2, tokens_in=1200, tokens_out=300, compute_units=4.0))
+
+
+def test_budget_spent_scores_with_gpu_seconds_from_the_log(item, run):
+    config, board, budget, compute = run
+    cached, refined, thermo = thermo_step(item, board, budget, compute)
+    assert post_verified(board, thermo, compute, config, budget) == (VerifierStatus.accepted, "Checks passed")
+    budget.charge_tool_call()
+    kinetics = Artifact(artifact_id=board.new_id("kinetics"), run_id=board.run_id, item_id=item.item_id,
+                        agent="kinetics", type="kinetics_report", values={"tammann_a_c": 2.0},
+                        cost=Cost(tool_calls=1))
+    assert post_verified(board, kinetics, compute, config, budget, tool_values={"tammann_a_c": 2.0}) \
+        == (VerifierStatus.accepted, "Checks passed")
+    # Refused before anything runs: nothing is charged or logged.
+    with pytest.raises(BudgetExceeded):
+        compute.request(item, "single_point", ComputeStatus.ok, 3.0, 2.0, {"dE_ev_per_atom": 0.9})
+
+    accepted, requests, spent = board.accepted_artifacts(item.item_id), compute.log_for(item.item_id), budget.spent
+    assert spent == Cost(tool_calls=3, tokens_in=1200, tokens_out=300, compute_units=4.0)
+    engine = engine_for(synthetic_rules(), config)
+    # The dev mismatch: Budget never measures GPU-seconds, so the default mode refuses its cost.
+    with pytest.raises(ValueError, match=r"cost.gpu_seconds is 0.0 but .* total 12.5"):
+        engine.score(item, accepted, requests, [], cost=spent)
+    prediction = engine.score(item, accepted, requests, [], cost=spent, gpu_seconds_from_log=True)
+
+    # GPU-seconds come from the log; the cache hit stays charged; nothing else changes.
+    assert prediction.cost == spent.model_copy(update={"gpu_seconds": 12.5})
+    assert prediction.compute_requests == [cached.request_id, refined.request_id]
+    assert prediction.evidence == [thermo.artifact_id, kinetics.artifact_id]
+    assert [(f.reason, f.evidence) for f in prediction.review_flags] \
+        == [(ReviewReason.failed_computation, [refined.request_id])]
+    # USD is not in the compute log and Budget does not track it, so it stays as given.
+    assert prediction.cost.usd == 0.0
+    path = board.run_dir / "predictions.jsonl"
+    path.write_text(prediction.model_dump_json() + "\n", encoding="utf-8")
+    assert Prediction.model_validate_json(path.read_text(encoding="utf-8")) == prediction
+
+
+def test_budget_charge_still_in_flight_is_refused(item, run):
+    config, board, budget, compute = run
+    _, _, thermo = thermo_step(item, board, budget, compute)
+    budget.charge_compute(1.0)  # charged; the request has not been logged yet
+    status, notes = post_verified(board, thermo, compute, config, budget)
+    assert (status, notes) == (VerifierStatus.rejected, "Cumulative item compute cost exceeds compute log charges")
+    engine = engine_for(synthetic_rules(), config)
+    with pytest.raises(ValueError, match=r"cost.compute_units is 5.0 .* total 4.0"):
+        engine.score(item, [], compute.log_for(item.item_id), [], cost=budget.spent, gpu_seconds_from_log=True)

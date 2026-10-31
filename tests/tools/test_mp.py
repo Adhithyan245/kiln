@@ -68,3 +68,22 @@ def test_fetch_without_key_fails_loudly(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.delenv("MP_API_KEY", raising=False)
     with pytest.raises(RuntimeError, match="MP_API_KEY"):
         mp.fetch_chemsys("Ca-O-Ti", cache_dir=tmp_path)
+
+
+def test_cache_write_handles_real_mp_entry_types(tmp_path: Path) -> None:
+    """Real MP entries carry data["oxidation_states"] keyed by Element objects and a non-string
+    entry_id, neither of which JSON can hold, so the cache stores both as strings."""
+    from pymatgen.core import Element
+
+    class EntryID:  # stands in for the id type MP returns
+        def __str__(self) -> str:
+            return "mp-554278-GGA"
+
+    entries = ca_ti_o_entries()
+    entries[0].data = {"oxidation_states": {Element("Ti"): 4.0, Element("O"): -2.0}}
+    entries[0].entry_id = EntryID()
+    mp._write_entries(tmp_path / "Ca-O-Ti.json", entries)
+    loaded = mp.load_entries("Ca-O-Ti", cache_dir=tmp_path)
+    assert loaded[0].data["oxidation_states"] == {"Ti": 4.0, "O": -2.0}
+    assert loaded[0].entry_id == "mp-554278-GGA"
+    assert len(loaded) == len(entries)

@@ -6,6 +6,10 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "pydantic>=2.7",
     "filelock>=3.13",
+    "pymatgen>=2024.1",
+    "ase>=3.23",
+    "numpy>=1.26",
+    "mp-api>=0.41",
 ]
 
 [dependency-groups]

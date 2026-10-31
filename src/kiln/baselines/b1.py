@@ -98,7 +98,9 @@ def leave_one_precursor_out(feature_names: Sequence[str], rows: Sequence[Feature
 class FeatureDefinition(BaseModel):
     """Caller-defined feature and its meaning; provenance is caller-owned."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+    # model_construct() and model_copy(update=...) skip validation, so existing
+    # instances are validated again whenever they are passed back in.
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True, revalidate_instances="always")
     name: str
     description: str
 
@@ -118,7 +120,7 @@ class B1Settings(BaseModel):
     the maximum absolute gradient component to be at most tolerance.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True, revalidate_instances="always")
     features: tuple[FeatureDefinition, ...]
     learning_rate: Annotated[float, Field(gt=0, allow_inf_nan=False)]
     l2: Annotated[float, Field(ge=0, allow_inf_nan=False)]
@@ -168,11 +170,19 @@ class B1Engine:
     This boundary cannot establish a real freeze, feature provenance, or label
     access policy. The caller supplies targets and is responsible for those
     decisions. Scores are model outputs, not calibrated probabilities.
+
+    Settings are validated again into a private copy before the digest is
+    computed, so unvalidated instances are rejected and later changes to the
+    caller's object cannot alter the verified model.
     """
 
     def __init__(self, settings: B1Settings, *, verify_frozen_settings: Callable[[str], bool] | None = None):
         if not isinstance(settings, B1Settings):
             raise TypeError("settings must be a B1Settings")
+        try:
+            settings = B1Settings.model_validate(settings)
+        except Exception as exc:
+            raise B1ConfigurationError("B1 settings failed validation") from exc
         digest = settings.digest()
         try:
             attested = verify_frozen_settings is not None and verify_frozen_settings(digest) is True

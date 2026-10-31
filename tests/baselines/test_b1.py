@@ -143,6 +143,62 @@ def test_targets_and_folds_fail_closed():
         engine.predict_folds((rows[0].model_copy(update={"values": (float('nan'),)}), *rows[1:]), targets)
 
 
+def test_engine_revalidates_settings_that_skipped_validation():
+    settings = synthetic_settings()
+    calls = []
+
+    def verifier(digest):
+        calls.append(digest)
+        return True
+
+    # model_copy(update=...) and model_construct() build instances without validation.
+    bypassed = (
+        settings.model_copy(update={"l2": -0.5}),
+        settings.model_copy(update={"learning_rate": 0.0}),
+        settings.model_copy(update={"learning_rate": True}),
+        settings.model_copy(update={"tolerance": float("nan")}),
+        settings.model_copy(update={"max_iterations": 0}),
+        settings.model_copy(update={"fit_intercept": "no"}),
+        settings.model_copy(update={"features": ()}),
+        settings.model_copy(update={"features": settings.features * 2}),
+        settings.model_copy(update={"features": (FeatureDefinition.model_construct(name=" x", description="d"),)}),
+        settings.model_copy(update={"unexpected": 1}),
+        B1Settings.model_construct(learning_rate=1.0, l2=1.0),
+    )
+    for bad in bypassed:
+        with pytest.raises(B1ConfigurationError, match="failed validation"):
+            B1Engine(bad, verify_frozen_settings=verifier)
+    assert calls == []
+
+
+def test_revalidation_preserves_valid_digests():
+    for overrides in ({}, {"l2": 0.0}, {"l2": -0.0}, {"tolerance": 5e-324}, {"learning_rate": 1 / 3},
+                      {"learning_rate": 1}, {"fit_intercept": False}):
+        settings = synthetic_settings(**overrides)
+        assert synthetic_engine(settings).settings_digest == settings.digest()
+
+
+def test_engine_fits_the_verified_settings_not_the_callers_object():
+    settings = synthetic_settings()
+    engine = synthetic_engine(settings)
+    before = engine.predict_folds(synthetic_rows(), synthetic_targets())
+    object.__setattr__(settings, "l2", 0.1)
+    assert engine.predict_folds(synthetic_rows(), synthetic_targets()) == before
+    assert engine.settings_digest == synthetic_settings().digest()
+
+
+def test_settings_subclass_cannot_substitute_its_digest():
+    class OverridesDigest(B1Settings):
+        def digest(self):
+            return "claimed"
+
+    seen = []
+    with pytest.raises(B1ConfigurationError, match="not been verified"):
+        B1Engine(OverridesDigest(**dict(synthetic_settings())),
+                 verify_frozen_settings=lambda digest: seen.append(digest) or digest == "claimed")
+    assert seen == [synthetic_settings().digest()]
+
+
 def test_rejects_nonconvergence_and_invalid_settings():
     engine = synthetic_engine(synthetic_settings(max_iterations=1, tolerance=1e-20))
     with pytest.raises(B1ConvergenceError, match="did not converge"):

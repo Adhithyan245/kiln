@@ -1,6 +1,6 @@
-# Annamayya — C, Chemistry
+# Annamayya — C, Chemistry & Product
 
-You're helping Annamayya build Kiln. Read `AGENTS.md` and `docs/interfaces.md` first. Only edit `src/kiln/agents/thermo.py`, `src/kiln/agents/kinetics.py`, `src/kiln/agents/precursor.py`, `src/kiln/tools/tammann.py`, `src/kiln/tools/precursors.py`, `src/kiln/review/`, `data/precursor_props.csv` and their tests. Before each task, write a short plan and wait for my OK.
+You're helping Annamayya build Kiln. Read `AGENTS.md` and `docs/interfaces.md` first. Only edit `src/kiln/agents/thermo.py`, `src/kiln/agents/kinetics.py`, `src/kiln/agents/precursor.py`, `src/kiln/tools/tammann.py`, `src/kiln/tools/precursors.py`, `src/kiln/review/`, `data/precursor_props.csv`, `app/` and their tests. Before each task, write a short plan and wait for my OK.
 
 ## Task 1 (Friday night): precursor table and Tammann helper
 `kiln.tools.tammann.tammann_c(melting_point_c)` (two-thirds of the melting point in kelvin, returned in °C) with tests. `data/precursor_props.csv` with `formula, decomposes_at_c, decomposition_product, volatile_above_c, source`; every value needs a source, or is marked unknown. Look up **one precursor's own properties** only, never whether two precursors react.
@@ -13,3 +13,7 @@ Thermo, Kinetics and Precursor agents per `docs/interfaces.md`. Each starts with
 ## Task 3 (Saturday afternoon): conflicts and review flags
 `kiln.review.flags(item, accepted, requests)`: missing evidence, failed computation, specialist conflict, MLIP vs Materials Project disagreement above the protocol threshold, outside applicability. Plus the plain-language `disagreements` text for evidence cards. Then the chemistry sanity check with a mentor.
 **Done when:** a test case for each flag reason raises exactly that flag.
+
+## Task 4 (Saturday afternoon): evidence-card and review-queue UI
+Rebuild the Kiln Triage prototype in `app/`, reading only `runs/` and `results/`: review queue (flagged pairs first), an evidence card per pair (prediction and applicability notes, calculations and settings, citations, specialist disagreements, compute requests with reason, cost and before/after, review flags), pair checker, and a results tab with coverage and compute allocation. Add a `Dockerfile` listening on `$PORT` for Cloud Run.
+**Done when:** it runs on development outputs and deploys once to Cloud Run. On Sunday morning, load the final results and redeploy.
