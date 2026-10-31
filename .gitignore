@@ -9,6 +9,7 @@ labels/
 
 # Raw and bulky data (fetched by scripts)
 data/raw/
+data/ledger_precursor_genome.json
 cache/
 *.extxyz
 *.traj
