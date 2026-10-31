@@ -58,7 +58,7 @@ The reviewer's proposed architecture (each specialist agent posts a calibrated p
 - **Affected protocol.md sections:** None in Evaluation scope (would affect §4.1 and §6 if adopted by team).
 
 ## References
-- Szymanski, N. J., Byeon, P. W., Sun, Y., Zeng, Y., Bai, J., Kunz, M., Kim, K., Helms, B. A., Bartel, C. J., Kim, H., Ceder, G. (2024). Science Advances 10(27), DOI 10.1126/sciadv.adp3309 (OSTI 2446600).
-- McDermott, M. J., Dwaraknath, S. S., Persson, K. A. (2023). ACS Central Science 9(10), DOI 10.1021/acscentsci.3c01051.
+- Szymanski, N. J., Byeon, Y.-W., Sun, Y., Zeng, Y., Bai, J., Kunz, M., Kim, D.-M., Helms, B. A., Bartel, C. J., Kim, H., Ceder, G. (2024). Quantifying the regime of thermodynamic control for solid-state reactions during ternary metal oxide synthesis. Science Advances 10(27), DOI 10.1126/sciadv.adp3309 (OSTI 2446600).
+- McDermott, M. J., McBride, B. C., Regier, C. E., et al. (2023). Assessing Thermodynamic Selectivity of Solid-State Reactions for the Predictive Synthesis of Inorganic Materials. ACS Central Science 9(10), DOI 10.1021/acscentsci.3c01051.
 - Kiln Evaluation Protocol (Draft), `protocol/protocol.md`.
 - Kiln Project Rules, `AGENTS.md`.
