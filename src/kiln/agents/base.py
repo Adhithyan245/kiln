@@ -29,13 +29,20 @@ __all__ = ["Agent", "LLMResponse", "LLMUnavailable", "PRICES_USD_PER_MTOK", "llm
 
 # Dollar prices per million tokens, (input, output), keyed by exact model id. Output includes
 # thinking tokens. A model with no entry is logged with usd = 0 and a warning in LLMResponse.notes.
-# Gemini: ai.google.dev/gemini-api/docs/pricing, paid tier, standard (not Batch), read 2026-10-31;
-# gemini-3.8-flash doubles on 2027-01-01. Add the Claude and OpenAI models once the secondary-run
-# models are chosen.
+# Standard (not Batch) prices, read 2026-10-31:
+#   Gemini: ai.google.dev/gemini-api/docs/pricing (paid tier; gemini-3.8-flash doubles on 2027-01-01)
+#   Claude: platform.claude.com/docs/en/about-claude/pricing (Haiku 5.5 price for prompts up to 100k
+#           tokens; our per-item token cap keeps prompts well below that)
+#   OpenAI: developers.openai.com/api/docs/pricing
 PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {
     "gemini-3.8-flash": (0.75, 3.75),
     "gemini-3.1-flash-lite": (0.25, 1.50),
     "gemini-3-flash-preview": (0.50, 3.00),
+    "claude-haiku-5-5": (0.10, 0.50),
+    "claude-sonnet-5-5": (2.00, 10.00),
+    "claude-opus-5-5": (4.00, 20.00),
+    "gpt-5-mini": (0.25, 2.00),
+    "gpt-5-nano": (0.05, 0.40),
 }
 
 MAX_OUTPUT_TOKENS = 1024

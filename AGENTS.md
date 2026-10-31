@@ -19,6 +19,7 @@ Kiln is an auditable, budget-aware triage system for solid-state reactions. Spec
 11. **Scope for the first complete experiment is fixed:** no Glass/MD, no extra model families, no additional agents, no live new-candidate mode, and no second budget level unless the team agrees after profiling. The main comparison (C1–C4, all seeds) runs on Gemini only. Two **secondary** results run after it and are always reported separately, never pooled with the main table: a Claude replication on ~120 held-out pairs (1 seed) and the N2 memorization probe on an OpenAI model. Credit use is in `docs/credits.md`.
 
 ## How we build
+- **The plan is the Final Build Plan plus `docs/plan-changes.md`.** Every change listed there as approved is part of the plan, not a deviation; anything listed as proposed is out of scope until approved. Settings and their evidence are in `docs/compute-decisions.md`. When the team agrees a new change, add a row to `docs/plan-changes.md` in the same commit.
 - **One complete example first.** Until the 11 AM Saturday vertical slice works (one development pair through agents → GB10 request → verifier → score → evidence card), prefer wiring things together over adding features.
 - Read `docs/interfaces.md`. All data passed between modules uses `src/kiln/schemas.py`. Don't add fields without a commit that updates both files.
 - Only edit files in **your own folders** (below). If you need a change elsewhere, ask the owner.
@@ -29,7 +30,7 @@ Kiln is an auditable, budget-aware triage system for solid-state reactions. Spec
 | Folder / file | Owner |
 |---|---|
 | `src/kiln/data/`, `src/kiln/provenance/`, `src/kiln/verifier/`, `src/kiln/scoring/`, `src/kiln/baselines/`, `data/alab/`, `protocol/` | Hemanath (A — Evaluation) |
-| `src/kiln/compute/service.py`, `src/kiln/compute/client.py` (routing, caching, request log, health check), `src/kiln/tools/mp.py`, `src/kiln/board/`, `src/kiln/agents/base.py`, `src/kiln/agents/single.py`, `src/kiln/agents/planner.py`, `src/kiln/runners/`, `src/kiln/night/`, `env/gb10/`, `cache/` | CJ (B — Infrastructure & Integration) |
+| `src/kiln/compute/service.py`, `src/kiln/compute/client.py` (routing, caching, request log, health check), `src/kiln/tools/mp.py`, `src/kiln/board/`, `src/kiln/agents/base.py`, `src/kiln/agents/single.py`, `src/kiln/agents/planner.py`, `src/kiln/runners/`, `src/kiln/night/`, `src/kiln/compute/backends.py`, `src/kiln/compute/cache.py`, `src/kiln/compute/profile.py`, `env/gb10/`, `cache/` | CJ (B — Infrastructure & Integration) |
 | `src/kiln/agents/thermo.py`, `src/kiln/agents/kinetics.py`, `src/kiln/agents/precursor.py`, `src/kiln/tools/tammann.py`, `src/kiln/tools/precursors.py`, `src/kiln/review/`, `data/precursor_props.csv`, `app/` | Annamayya (C — Chemistry & Product) |
 | `src/kiln/compute/tiers.py` (single point, bounded relaxation), `src/kiln/compute/convergence.py`, `src/kiln/compute/energy_reference.py`, `src/kiln/compute/decomposition.py`, `src/kiln/budget.py`, `src/kiln/compute/profiling.py`, `src/kiln/compute/accounting.py` | Adhi (D — Compute Science) |
 | `src/kiln/schemas.py`, `docs/interfaces.md`, `AGENTS.md` | Shared: change only after telling the team |

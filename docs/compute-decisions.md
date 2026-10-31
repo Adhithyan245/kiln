@@ -25,7 +25,14 @@ Source: `results/gb10/first_calcs_float64.json`, `results/gb10/first_calcs_float
 
 ## 3. Open
 
-- Hull window: `tier_settings.json` uses 0.1 eV/atom, `docs/escalation-rule.md` proposes 0.08; freeze one value.
+- None. The hull window is decided below.
+
+## 4. Hull window: 0.1 eV/atom, one value (decided Sat Oct 31)
+
+- `ehull_max_ev_per_atom: 0.1` in `env/gb10/tier_settings.json` now only picks the near-hull competitors (on the a-b line) that an MLIP tier re-ranks; the phases the reaction energy depends on are always included (`_phase_set` in `tiers.py`).
+- Thermo's escalation rule (`docs/escalation-rule.md`) uses the same 0.1 for "a product near the hull".
+- B60meV (60 meV/atom) is a different quantity, the margin between competing products, and stays separate.
+- Evidence for the phase set: on CJ's 20 profiling pairs, required phases are 5 to 12 and the full set 8 to 34 (cap 40, was 75 to 440 entries), and the MP reaction energy matches the whole chemical system exactly on every pair.
 
 ## 3. Backend: ASE stays the default; the ALCHEMI Toolkit backend is built and verified (decided Sat Oct 31)
 

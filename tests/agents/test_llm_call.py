@@ -58,8 +58,18 @@ def test_dollars_use_the_price_table_including_thinking_tokens(monkeypatch: pyte
 
 def test_unpriced_model_records_zero_dollars_with_a_note(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(base, "_openai", lambda prompt, system, config: ("ok", 10, 5))
-    r = llm_call("hi", Budget(cfg("gpt-5-mini")), cfg("gpt-5-mini"))
+    r = llm_call("hi", Budget(cfg("gpt-4.1-mini")), cfg("gpt-4.1-mini"))
     assert r.usd == 0.0 and "no price" in r.notes
+
+
+@pytest.mark.parametrize("model, provider, tin, tout, usd", [
+    ("claude-haiku-5-5", "_anthropic", 10_000, 1_000, (10_000 * 0.10 + 1_000 * 0.50) / 1e6),
+    ("gpt-5-mini", "_openai", 10_000, 1_000, (10_000 * 0.25 + 1_000 * 2.00) / 1e6),
+])
+def test_secondary_models_are_priced(monkeypatch: pytest.MonkeyPatch, model, provider, tin, tout, usd) -> None:
+    monkeypatch.setattr(base, provider, lambda prompt, system, config: ("ok", tin, tout))
+    b = Budget(cfg(model))
+    assert llm_call("hi", b, cfg(model)).usd == pytest.approx(usd) and b.spent.usd == pytest.approx(usd)
 
 
 def test_tokens_over_the_cap_are_recorded_then_refused(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -42,3 +42,15 @@ Models live in `src/kiln/schemas.py`; owners are in `AGENTS.md`. **Build the 11 
 
 ## Run folders
 `runs/<run_id>/config.json`, `board/`, `compute_requests.jsonl`, `predictions.jsonl`, `prediction.sha256`, `cost.json`, `verifier.log`.
+
+## Additions since the kit (all on `dev`)
+These extend the interfaces above; nothing above was removed. Approved changes are listed in `docs/plan-changes.md`.
+
+- **Budget:** `charge_tokens(tokens_in, tokens_out)` (not `in, out`: `in` is reserved in Python); `record_usd(usd)` records experiment API spend (not capped); `spent` gives a `Cost`.
+- **Board:** `Board(run_dir, name="board")` (C2 gives each isolated specialist its own `name`); `new_id(kind)`, `decline(need_id, agent)`, `needs()`, `artifacts()`, `get_need()`, `get_artifact()`. The verifier records a verdict by re-posting the artifact with its new `verifier` status (append-only; the latest record wins).
+- **LLM:** `kiln.agents.base.llm_call(prompt, budget, config, *, system="")` and `llm_choose(options, context, budget, config)`: provider from `RunConfig.model` (`gemini-*`, `claude-*`, `gpt-*`, or `offline`), temperature 0, the run's seed, tokens (Gemini thinking included) and dollars charged to the budget. Keys from `GEMINI_API_KEY` (`GEMINI_API_KEY_2` as fallback), `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`; a missing key is an error, never a silent switch to `offline`.
+- **Tiers (Adhi):** `kiln.compute.tiers.single_point(structures, settings)` and `bounded_relaxation(structures, settings)` return a `TierRun` of per-structure `StructureResult`s (status, energy, max force, max stress, steps) with GPU-seconds. `settings["backend"]` is `"ase"` (default) or `"nvalchemi"`. MLIP tier results also carry `max_abs_phase_mlip_minus_mp_ev_per_atom` (a compute result, not an artifact value key).
+- **Energy reference (Adhi):** `kiln.compute.energy_reference.corrected_energy`, `corrected_entry`, `phase_differences`: MLIP energies on the MP2020 scale, ALCHEMI-minus-MP per phase.
+- **Decomposition tier (Adhi):** `decomposition_reeval` inputs are `{"precursor_a", "precursor_b", "temperature_c", "properties": {formula: {"decomposes_at_c", "decomposition_product"}}}` (the keys of `data/precursor_props.csv`). A precursor counts as decomposed only if its temperature is known and the furnace is at or above it. The result adds `dE_before_ev_per_atom`, `products_before`, `decomposed`, `decomposition_unknown`, `changed`. The older `{"decomposed": {precursor: product}}` input still works.
+- **Profiling and prices (Adhi):** `python -m kiln.compute.profiling --summary <profile.json> --hours H --workers N` writes `protocol/prices_proposal.json` (compute unit = median `single_point` GPU-seconds; per-pair budget = one escalation path; Night 2 fit).
+- **Accounting (Adhi):** `python -m kiln.compute.accounting runs/<run>...` writes `results/compute_allocation.json` and `.md`: totals per request, pair and condition, an exact reconciliation of the request log against each prediction's `cost.compute_units`, and the allocation table. `replay_changes(...)` fills "changed a prediction" once OPEN-17 is defined.
