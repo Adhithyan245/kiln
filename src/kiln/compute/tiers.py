@@ -84,8 +84,29 @@ def _mp_lookup(inputs: dict[str, Any], cache_dir: Path) -> BackendResult:
                                             "source": "materials_project"})
 
 
-def _decomposition(inputs: dict[str, Any], cache_dir: Path) -> BackendResult:
+def _decomposition(inputs: dict[str, Any], cache_dir: Path, settings: dict[str, Any] | None = None,
+                   calculator_factory: CalculatorFactory | None = None) -> BackendResult:
+    """Two input forms: {"temperature_c", "properties": {formula: {decomposes_at_c,
+    decomposition_product}}} decides decomposition from the furnace temperature (kiln.compute.
+    decomposition); {"decomposed": {precursor: product}} uses a decision already made."""
     a, b = _pair(inputs)
+    if "properties" in inputs:
+        from kiln.compute.decomposition import reevaluate
+
+        if "temperature_c" not in inputs:
+            raise ValueError("inputs with properties need temperature_c")
+        r = reevaluate(a, b, float(inputs["temperature_c"]), dict(inputs["properties"]), cache_dir=cache_dir,
+                       settings=settings or None, calculator_factory=calculator_factory)
+        if r.status == ComputeStatus.failed:
+            return BackendResult(ComputeStatus.failed, {"error": r.error})
+        return BackendResult(ComputeStatus.ok, {
+            "dE_ev_per_atom": r.dE_after_ev_per_atom, "products": r.products_after,
+            "mixing_ratio": r.mixing_ratio_after, "reactants": r.reactants_after,
+            "dE_before_ev_per_atom": r.dE_before_ev_per_atom, "products_before": r.products_before,
+            "decomposed": ", ".join(f"{k}->{v}" for k, v in r.decomposed.items()),
+            "decomposition_unknown": ", ".join(r.unknown), "changed": r.changed,
+            "filled_by_single_point": ", ".join(r.filled_by_single_point),
+            "source": "materials_project"})
     decomposed: dict[str, str] = dict(inputs.get("decomposed") or {})
     unknown = set(decomposed) - {a, b}
     if unknown:
@@ -265,7 +286,7 @@ def run_tier(tier: ComputeTier, inputs: dict[str, Any], settings: dict[str, Any]
     if tier == ComputeTier.cached_lookup:
         out = _mp_lookup(inputs, cache_dir)
     elif tier == ComputeTier.decomposition_reeval:
-        out = _decomposition(inputs, cache_dir)
+        out = _decomposition(inputs, cache_dir, settings, calculator_factory)
     elif tier in (ComputeTier.single_point, ComputeTier.bounded_relaxation):
         out = _mlip(tier, inputs, settings, cache_dir, calculator_factory)
     else:
