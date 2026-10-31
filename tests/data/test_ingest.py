@@ -1,4 +1,7 @@
 import json
+import os
+import subprocess
+import sys
 
 import pytest
 
@@ -43,6 +46,25 @@ def test_selection_is_independent_of_record_order(tmp_path):
     forward, _ = ingest(write_ledger(tmp_path))
     reverse, _ = ingest(write_ledger(tmp_path, reverse=True))
     assert {i.item_id: i.split for i in forward} == {i.item_id: i.split for i in reverse}
+
+
+def test_summary_command_uses_label_free_projection(tmp_path):
+    path = write_ledger(tmp_path)
+    items, _ = ingest(path)
+    precursors = {name for item in items for name in (item.precursor_a, item.precursor_b)}
+    expected = _heldout(precursors, 42)
+    result = subprocess.run(
+        [sys.executable, "-m", "kiln.data", str(path)],
+        check=True, capture_output=True, text=True, env=os.environ.copy(),
+    )
+    lines = result.stdout.splitlines()
+    assert lines == [
+        f"Distinct precursors: {len(precursors)}",
+        f"Held-out precursors: {', '.join(sorted(expected))}",
+        f"Dev items: {sum(item.split == 'dev' for item in items)}",
+        f"Held-out items: {sum(item.split == 'heldout' for item in items)}",
+    ]
+    assert "synthetic-secret" not in result.stdout + result.stderr
 
 
 @pytest.mark.parametrize("field,value", [
