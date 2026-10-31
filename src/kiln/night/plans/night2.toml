@@ -1,0 +1,102 @@
+# Night 2: all conditions -> predictions manifest -> hash posted -> labels -> score -> push -> stop Brev.
+# Run on the GPU host inside tmux:  python -m kiln.night run src/kiln/night/plans/night2.toml
+# Rehearse first with --dry-run, then a dev-only copy of this plan on 5 items.
+
+name = "night2"
+labels_must_be_absent = true   # labels may arrive only through fetch_labels, after the receipt
+heartbeat_s = 1800
+cap_check_s = 60
+stop_grace_s = 300
+
+[caps]
+# TODO-owner-CJ: set from the 7 PM dry run (protocol OPEN-02). Required for a real run.
+# max_tokens = 0
+# max_usd = 0.0
+# max_gpu_hours = 0.0
+
+[retry]
+base_s = 30
+factor = 2
+jitter = 0.25
+max_delay_s = 900
+
+[gate]
+receipt = "protocol/posts.jsonl"
+manifest = "protocol/predictions.manifest.json"
+
+[[steps]]
+name = "preflight"
+cmd = ["python", "-c", "import kiln.compute.client, kiln.scoring.score; print('imports ok')"]
+timeout_s = 300
+retries = 0
+note = "Labels-absent check is done by the runner before any step."
+
+[[steps]]
+name = "run_conditions"
+# TODO-owner-Adhi: kiln.runners.conditions has no CLI yet. Expected: run C1-C4 x seeds on held-out
+# items, resumable per item, writing runs/<run_id>/predictions.jsonl and cost.json.
+cmd = ["python", "-m", "kiln.runners.conditions", "--split", "heldout", "--all-conditions", "--all-seeds"]
+depends_on = ["preflight"]
+env = ["GEMINI_API_KEY"]
+timeout_s = 36000
+retries = 2
+
+[[steps]]
+name = "manifest"
+cmd = ["python", "-m", "kiln.night.prereg", "manifest", "--runs-dir", "runs", "--out", "protocol/predictions.manifest.json"]
+depends_on = ["run_conditions"]
+timeout_s = 600
+retries = 1
+
+[[steps]]
+name = "post_hash"
+cmd = ["python", "-m", "kiln.night.prereg", "post", "--manifest", "protocol/predictions.manifest.json", "--receipt", "protocol/posts.jsonl"]
+depends_on = ["manifest"]
+env = ["KILN_PREREG_WEBHOOK"]
+timeout_s = 300
+retries = 4
+
+[[steps]]
+name = "fetch_labels"
+# TODO-owner-Hemanath: the label source and its independent posted-hash check are OPEN-16.
+# Fails loudly until written; scoring cannot run without it.
+cmd = ["python", "-c", "raise SystemExit('TODO-owner-Hemanath: fetch_labels not implemented (OPEN-16)')"]
+depends_on = ["post_hash"]
+requires_receipt = true
+timeout_s = 600
+retries = 0
+
+[[steps]]
+name = "score"
+# TODO-owner-Hemanath: kiln.scoring.evaluate has no CLI yet; it needs verify_posted_hash wired.
+cmd = ["python", "-c", "raise SystemExit('TODO-owner-Hemanath: score CLI not implemented')"]
+depends_on = ["fetch_labels"]
+requires_receipt = true
+timeout_s = 1800
+retries = 0
+
+[[steps]]
+name = "figures"
+# TODO-owner-Hemanath/Adhi: figures and results/comparison.json from the evaluator output.
+cmd = ["python", "-c", "raise SystemExit('TODO: figures not implemented')"]
+depends_on = ["score"]
+timeout_s = 1800
+retries = 0
+
+[[steps]]
+name = "push"
+cmd = ["python", "-m", "kiln.night.gitpush", "--paths", "runs", "results", "protocol", "--message", "night2: predictions, receipt and results"]
+# Depends only on the hash post, so predictions and the receipt are pushed even if scoring fails.
+depends_on = ["post_hash"]
+timeout_s = 600
+retries = 3
+
+[[steps]]
+name = "stop_brev"
+cmd = ["brev", "stop", "${BREV_INSTANCE}"]
+env = ["BREV_INSTANCE"]
+on_missing_env = "skip"
+always = true
+timeout_s = 300
+retries = 2
+note = "Skipped with a note when Brev was not used."
