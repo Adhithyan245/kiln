@@ -170,6 +170,12 @@ class ScoringEngine:
     ``verify_frozen_rules`` receives the rules' SHA-256 digest and must return
     the literal True; otherwise, or if it raises, construction fails. The
     engine never decides that rules are frozen.
+
+    The rules are validated again into a private plain ``ScoringRules`` before
+    the digest is computed, so unvalidated instances (``model_construct``,
+    ``model_copy(update=...)``) are refused before the verifier is called, a
+    subclass cannot supply its own digest, and later changes to the caller's
+    object cannot alter the attested rules. ``rules`` returns a copy.
     """
 
     def __init__(
@@ -184,7 +190,11 @@ class ScoringEngine:
         if not isinstance(config, RunConfig):
             raise TypeError("config must be a RunConfig")
         config = RunConfig.model_validate(config.model_dump())
-        digest = rules.digest()
+        try:
+            rules = ScoringRules.model_validate(rules)
+        except Exception as exc:
+            raise ScoringConfigurationError("Scoring rules failed validation") from exc
+        digest = ScoringRules.digest(rules)
         try:
             attested = verify_frozen_rules is not None and verify_frozen_rules(digest) is True
         except Exception as exc:
@@ -199,7 +209,8 @@ class ScoringEngine:
 
     @property
     def rules(self) -> ScoringRules:
-        return self._rules
+        """A copy of the attested rules; the engine's own snapshot stays private."""
+        return self._rules.model_copy(deep=True)
 
     @property
     def rules_digest(self) -> str:
@@ -269,6 +280,7 @@ class ScoringEngine:
         flags: Sequence[ReviewFlag],
         *,
         cost: Cost,
+        gpu_seconds_from_log: bool = False,
     ) -> Prediction:
         """Prediction for one item.
 
@@ -285,10 +297,20 @@ class ScoringEngine:
         is kept. Scoring adds a missing-evidence flag for each feature that
         used its fallback, and a failed-computation flag for each failed or
         non-converged request that no failed-computation flag cites.
+
+        ``gpu_seconds_from_log=True`` is for a ``cost`` that does not measure
+        GPU time, such as ``kiln.budget.Budget.spent``. ``cost.gpu_seconds``
+        must then be exactly 0.0, and the prediction's GPU-seconds are the sum
+        of the measured ``gpu_seconds`` over ``requests``. A nonzero value is
+        refused, not replaced; check a measured value in the default mode.
+        ``cost.compute_units`` must still equal the log total, which is what
+        shows the log is complete. Every other field is kept as given.
         """
+        if not isinstance(gpu_seconds_from_log, bool):
+            raise TypeError("gpu_seconds_from_log must be a bool")
         accepted, requests, flags = tuple(accepted), tuple(requests), tuple(flags)
         self._check_run(_validate_inputs(item, accepted, requests, flags))
-        _check_cost(cost, requests)
+        cost = _check_cost(cost, requests, gpu_seconds_from_log=gpu_seconds_from_log)
         values, used, fallbacks = self._resolve(accepted)
         p_react = self._p_react(values)
         outcome = self._outcome(p_react, values)
@@ -324,22 +346,34 @@ class ScoringEngine:
             review_flags=review_flags,
             applicability_notes=[flag.detail for flag in review_flags
                                  if flag.reason in self._rules.applicability_flag_reasons],
-            cost=cost.model_copy(),
+            cost=cost,
         )
 
 
-def _check_cost(cost: Cost, requests: tuple[ComputeRequest, ...]) -> None:
+def _check_cost(cost: Cost, requests: tuple[ComputeRequest, ...], *, gpu_seconds_from_log: bool) -> Cost:
+    """Return the prediction's cost after checking it against the complete compute log."""
     if not isinstance(cost, Cost):
         raise TypeError("cost must be a Cost")
     for name in Cost.model_fields:
         value = getattr(cost, name)
         if isinstance(value, bool) or not math.isfinite(value) or value < 0:
             raise ValueError(f"invalid cost: {name}")
+    totals: dict[str, float] = {}
     for name in ("compute_units", "gpu_seconds"):
         parts = [getattr(request, name) for request in requests]
         if any(not math.isfinite(part) or part < 0 for part in parts):
             raise ValueError(f"invalid compute request {name}")
-        total = math.fsum(parts)
+        # fsum is correctly rounded, so the total does not depend on log order.
+        total = totals[name] = math.fsum(parts)
+        if name == "gpu_seconds" and gpu_seconds_from_log:
+            continue
         if not _close(getattr(cost, name), total):
             raise ValueError(f"cost.{name} is {getattr(cost, name)!r} but the item's compute requests total "
                              f"{total!r}; requests must be the complete compute log and every charge logged")
+    if not gpu_seconds_from_log:
+        return cost.model_copy()
+    if cost.gpu_seconds != 0.0:
+        raise ValueError(f"cost.gpu_seconds is {cost.gpu_seconds!r}, but gpu_seconds_from_log takes GPU-seconds "
+                         f"only from the compute log (total {totals['gpu_seconds']!r}); a cost that measures "
+                         "GPU time must be checked against the log with gpu_seconds_from_log=False")
+    return cost.model_copy(update={"gpu_seconds": totals["gpu_seconds"]})

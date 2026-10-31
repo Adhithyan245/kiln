@@ -119,3 +119,21 @@ def test_digest_identifies_the_rule_set():
         rules(disagreement_flag_reasons=()),
     ]
     assert len({other.digest() for other in changed} | {built.digest()}) == len(changed) + 1
+
+
+def test_digest_refuses_an_unvalidated_instance():
+    # model_copy(update=...) and model_construct() skip validation.
+    built = rules()
+    for bad in (built.model_copy(update={"otherwise": "not an outcome"}),
+                built.model_copy(update={"features": [feature()]}),
+                built.model_copy(update={"p_react": built.p_react.model_copy(update={"link": "probit"})}),
+                ScoringRules.model_construct(features=built.features)):
+        with pytest.raises(ValidationError):
+            bad.digest()
+
+
+def test_unvalidated_parts_are_validated_again_when_nested():
+    with pytest.raises(ValidationError, match="finite"):
+        LinearScore(intercept=0.0, terms=(Term.model_construct(feature="x", weight=float("nan")),), link="logistic")
+    with pytest.raises(ValidationError, match="blank"):
+        rules(otherwise=Outcome.model_construct(category=Category.unreacted, cause=" ", fix="synthetic fix"))
