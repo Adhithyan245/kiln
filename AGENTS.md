@@ -1,6 +1,6 @@
 # AGENTS.md: shared rules for every coding assistant on Kiln
 
-Claude Code, Codex and Gemini CLI all follow this file (Codex reads it directly; Claude Code and Gemini CLI load it through `CLAUDE.md` and `GEMINI.md`, which just import it). It is the **only** copy of the project rules. Change it through a pull request into `dev`.
+Claude Code, Codex and Gemini CLI all follow this file (Codex reads it directly; Claude Code and Gemini CLI load it through `CLAUDE.md` and `GEMINI.md`, which just import it). It is the **only** copy of the project rules. Change it on `dev` and tell the team.
 
 ## The project in six lines
 Kiln is an auditable, budget-aware triage system for solid-state reactions. Specialist agents (Thermo, Kinetics, Precursor) decide, for each precursor pair, whether two precursors react at a given furnace temperature, and **when extra computation is worth spending** on the GB10. They coordinate through a shared **need board** with no central planner. Every compute request is priced, logged and checked for whether it changed the prediction. A deterministic **verifier** checks every artifact, fixed **scoring functions** turn accepted evidence into predictions, and **review flags** mark missing, failed or conflicting evidence. We compare the collective with a single agent, isolated specialists and a central planner at one locked budget on the **Precursor Genome** (1,035 A-Lab reactions, split by precursor). The **Kiln Triage** app shows an evidence card for every pair.
@@ -10,7 +10,7 @@ Kiln is an auditable, budget-aware triage system for solid-state reactions. Spec
 2. **Never look up experimental outcomes online**: no searching for Precursor Genome results, A-Lab outcomes, or whether specific precursors react. Reading library documentation is fine.
 3. **Kiln's own agents get no web access** at runtime. Their only tools are in `src/kiln/tools/` and the compute service.
 4. **Never commit secrets**: API keys, webhook URLs, `.env` files, tokens. Read them from environment variables.
-5. **Never push to `main`.** Work on a feature branch (`yourname/task`) and open a PR into `dev`.
+5. **Never push to `main`.** Push your work to `dev` (no PR needed). Run `git pull --rebase` before pushing, and never force-push or delete `dev`. Only Adhi merges `dev` into `main`, through a PR.
 6. **The GB10 is borrowed:** no `sudo`, no system packages, no changes outside the home folder, don't register it into Brev. Always set `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` before running PyTorch on it.
 7. **LLM agents never set numbers.** They choose what to compute and write rationales; every number in a prediction comes from tool and compute-service outputs through the scoring functions.
 8. **All computation goes through the compute service and the budget.** Every request is charged at the frozen price for its tier, **even on a cache hit**, and logged with a reason. Never call ALCHEMI directly from an agent, and never bypass the budget.
@@ -20,7 +20,7 @@ Kiln is an auditable, budget-aware triage system for solid-state reactions. Spec
 
 ## How we build
 - **One complete example first.** Until the 11 AM Saturday vertical slice works (one development pair through agents → GB10 request → verifier → score → evidence card), prefer wiring things together over adding features.
-- Read `docs/interfaces.md`. All data passed between modules uses `src/kiln/schemas.py`. Don't add fields without a PR that updates both files.
+- Read `docs/interfaces.md`. All data passed between modules uses `src/kiln/schemas.py`. Don't add fields without a commit that updates both files.
 - Only edit files in **your own folders** (below). If you need a change elsewhere, ask the owner.
 - Start each task by writing a short plan and waiting for the human's OK.
 
@@ -31,7 +31,7 @@ Kiln is an auditable, budget-aware triage system for solid-state reactions. Spec
 | `src/kiln/compute/` (service, tiers, convergence, accounting), `src/kiln/tools/mp.py`, `src/kiln/night/`, `env/gb10/`, `cache/` | CJ (B — Compute) |
 | `src/kiln/agents/thermo.py`, `src/kiln/agents/kinetics.py`, `src/kiln/agents/precursor.py`, `src/kiln/tools/tammann.py`, `src/kiln/tools/precursors.py`, `src/kiln/review/`, `data/precursor_props.csv` | Annamayya (C — Chemistry) |
 | `src/kiln/board/`, `src/kiln/agents/base.py`, `src/kiln/agents/single.py`, `src/kiln/agents/planner.py`, `src/kiln/runners/`, `src/kiln/budget.py`, `app/` | Adhi (D — Integration & Product) |
-| `src/kiln/schemas.py`, `docs/interfaces.md`, `AGENTS.md` | Shared: change only by PR, and tell the team |
+| `src/kiln/schemas.py`, `docs/interfaces.md`, `AGENTS.md` | Shared: change only after telling the team |
 
 ## Conventions
 - Python 3.12, managed with `uv`. Pydantic v2 for all data models. Type hints everywhere.
@@ -44,4 +44,4 @@ Kiln is an auditable, budget-aware triage system for solid-state reactions. Spec
 1. The stated check passes (a test, a printed number, or a working command).
 2. Outputs validate against `src/kiln/schemas.py`.
 3. No secrets or label data in the diff.
-4. PR opened into `dev` with the template filled in.
+4. Committed and pushed to `dev` with a clear message.
