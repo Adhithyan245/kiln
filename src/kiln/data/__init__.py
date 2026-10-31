@@ -8,12 +8,28 @@ import re
 from pathlib import Path
 from typing import IO, Any, Literal
 
+from pydantic import ValidationError
+
 from kiln.provenance import ItemProvenance
 from kiln.schemas import Item
 
 DEFAULT_LEDGER = Path(__file__).resolve().parents[3] / "data/raw/ledger_precursor_genome.json"
 SPLIT_SEED = 42
 HELDOUT_PRECURSORS = 9
+
+
+class LedgerError(ValueError):
+    """Ledger problem whose message names fields only, never ledger values."""
+
+
+class LedgerRecordError(LedgerError):
+    """Problem with one sample; ``reason`` names fields without the record position."""
+
+    def __init__(self, index: int, reason: str):
+        super().__init__(f"Sample {index} {reason}")
+        self.index = index
+        self.reason = reason
+
 
 # Only these paths are decoded. Everything else is skipped without decoding its value.
 _SELECTION: dict[str, Any] = {"samples": [{
@@ -40,7 +56,7 @@ class _ProjectionReader:
     def expect(self, char: str) -> None:
         self.whitespace()
         if self.char != char:
-            raise ValueError("Invalid ledger JSON structure")
+            raise LedgerError("Invalid ledger JSON structure")
         self.advance()
 
     def string(self, keep: bool) -> str | None:
@@ -58,12 +74,12 @@ class _ProjectionReader:
                 escaped = True
             else:
                 escaped = False
-        raise ValueError("Unterminated JSON string")
+        raise LedgerError("Unterminated JSON string")
 
     def value(self, selection: Any = None) -> Any:
         self.whitespace()
         if selection is True and self.char in ('{', '['):
-            raise ValueError("Selected ledger value must be a scalar, not a container")
+            raise LedgerError("Selected ledger value must be a scalar, not a container")
         if self.char == '{':
             self.advance()
             result = {} if isinstance(selection, dict) else None
@@ -106,18 +122,18 @@ class _ProjectionReader:
             try:
                 return json.loads(''.join(token))
             except ValueError as exc:
-                raise ValueError("Invalid selected ledger value") from exc
+                raise LedgerError("Invalid selected ledger value") from exc
         return None
 
 
 def _heldout(formulas: set[str], seed: int) -> set[str]:
     if len(formulas) < HELDOUT_PRECURSORS:
-        raise ValueError("At least nine distinct precursors are required")
+        raise LedgerError("At least nine distinct precursors are required")
     groups: dict[str, list[str]] = {}
     for formula in sorted(formulas):
         match = re.match(r"[A-Z][a-z]?", formula)
         if not match:
-            raise ValueError("Precursor formula must start with an element symbol")
+            raise LedgerError("Precursor formula must start with an element symbol")
         groups.setdefault(match.group(), []).append(formula)
     rng = random.Random(seed)
     keys = sorted(groups)
@@ -146,39 +162,39 @@ def ingest(path: str | Path = DEFAULT_LEDGER, *, seed: int = SPLIT_SEED) -> tupl
         projected = reader.value(_SELECTION)
         reader.whitespace()
         if reader.char:
-            raise ValueError("Trailing content in ledger")
+            raise LedgerError("Trailing content in ledger")
     if not isinstance(projected, dict) or not isinstance(projected.get("samples"), list):
-        raise ValueError("Ledger must contain a samples array")
+        raise LedgerError("Ledger must contain a samples array")
     records = []
     ids: set[str] = set()
     formulas: set[str] = set()
     for index, sample in enumerate(projected["samples"]):
         if not isinstance(sample, dict):
-            raise ValueError(f"Sample {index} must be an object")
+            raise LedgerRecordError(index, "must be an object")
         precursors = sample.get("precursors")
         synthesis = sample.get("synthesis")
         if not isinstance(precursors, list) or len(precursors) != 2:
-            raise ValueError(f"Sample {index} requires exactly two precursors")
+            raise LedgerRecordError(index, "requires exactly two precursors")
         if not isinstance(synthesis, dict):
-            raise ValueError(f"Sample {index} is missing synthesis data and heating temperature")
+            raise LedgerRecordError(index, "is missing synthesis data and heating temperature")
         if synthesis.get("heating_temperature") is None:
-            raise ValueError(f"Sample {index} is missing synthesis.heating_temperature")
+            raise LedgerRecordError(index, "is missing synthesis.heating_temperature")
         names = []
         fields = ["sample_id", "precursors", "synthesis.heating_temperature"]
         for position, precursor in enumerate(precursors):
             if not isinstance(precursor, dict):
-                raise ValueError(f"Sample {index} has an invalid precursor")
+                raise LedgerRecordError(index, "has an invalid precursor")
             key = "formula_clean" if precursor.get("formula_clean") else "formula"
             name = precursor.get(key)
             if not isinstance(name, str) or not name.strip():
-                raise ValueError(f"Sample {index} has a missing precursor formula")
+                raise LedgerRecordError(index, "has a missing precursor formula")
             names.append(name.strip())
             fields.append(f"precursors[{position}].{key}")
             if precursor.get("melting_point_c") is not None:
                 fields.append(f"precursors[{position}].melting_point_c")
         item_id = sample.get("sample_id")
         if not isinstance(item_id, str) or not item_id.strip() or item_id in ids:
-            raise ValueError(f"Sample {index} has a missing or duplicate sample_id")
+            raise LedgerRecordError(index, "has a missing or duplicate sample_id")
         ids.add(item_id)
         formulas.update(names)
         if synthesis.get("heating_time") is not None:
@@ -192,10 +208,15 @@ def ingest(path: str | Path = DEFAULT_LEDGER, *, seed: int = SPLIT_SEED) -> tupl
     provenance: list[ItemProvenance] = []
     for index, (values, fields) in enumerate(records):
         split = "heldout" if selected.intersection((values["precursor_a"], values["precursor_b"])) else "dev"
-        item = Item(**values, split=split)
+        try:
+            item = Item(**values, split=split)
+        except ValidationError as exc:
+            # Pydantic quotes the offending input; report field names only and drop the chained error.
+            names = ", ".join(sorted({".".join(map(str, error["loc"])) for error in exc.errors()}))
+            raise LedgerRecordError(index, f"failed Item validation for {names}") from None
         for value in (item.temperature_c, item.dwell_h, item.melting_point_a_c, item.melting_point_b_c):
             if value is not None and not math.isfinite(value):
-                raise ValueError(f"Sample {index} has a non-finite measurement")
+                raise LedgerRecordError(index, "has a non-finite measurement")
         items.append(item)
         provenance.append(ItemProvenance(item_id=item.item_id, source_file=str(path), record_index=index, fields_used=fields))
     return items, provenance
