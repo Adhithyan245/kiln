@@ -6,7 +6,7 @@ import traceback
 
 import pytest
 
-from kiln.data import LedgerRecordError, _heldout, ingest, load_items
+from kiln.data import DWELL_PROVENANCE, HEATING_TIME_SOURCE, HEATING_TIME_UNIT, LedgerRecordError, _heldout, ingest, load_items
 from kiln.schemas import Item
 
 # Distinctive synthetic per-record values that the summary command must never print.
@@ -161,3 +161,41 @@ def test_rejects_bad_records_and_split(tmp_path):
         ingest(path)
     with pytest.raises(ValueError, match="nine"):
         _heldout({"Li2O"}, 42)
+
+
+def _set_heating_times(path, times):
+    document = json.loads(path.read_text())
+    for sample, minutes in zip(document["samples"], times):
+        if minutes is _DROP:
+            sample["synthesis"].pop("heating_time")
+        else:
+            sample["synthesis"]["heating_time"] = minutes
+    path.write_text(json.dumps(document))
+
+
+_DROP = object()
+
+
+def test_heating_time_minutes_become_dwell_hours_with_sourced_provenance(tmp_path):
+    # Synthetic ledger. The unit is minutes per the dataset paper's ledger schema
+    # ("heating_time_min") and its methods ("a 1-hour hold"), arXiv:2607.09903.
+    assert HEATING_TIME_UNIT == "min"
+    assert "arXiv:2607.09903" in HEATING_TIME_SOURCE and "heating_time_min" in HEATING_TIME_SOURCE
+    path = write_ledger(tmp_path)
+    _set_heating_times(path, [60, 240, 90.0, _DROP])
+    items, provenance = ingest(path)
+    assert [item.dwell_h for item in items[:4]] == [1.0, 4.0, 1.5, None]
+    for record in provenance[:3]:
+        assert "synthesis.heating_time" in record.fields_used
+        assert DWELL_PROVENANCE in record.fields_used
+    assert "synthesis.heating_time" not in provenance[3].fields_used
+    assert DWELL_PROVENANCE not in provenance[3].fields_used
+    assert all(Item.model_validate(item.model_dump()) == item for item in items)
+
+
+@pytest.mark.parametrize("bad", ["PRIVATE-60", "60", True])
+def test_non_numeric_heating_time_is_rejected_by_field_name(tmp_path, bad):
+    path = write_ledger(tmp_path)
+    _set_heating_times(path, [bad])
+    with pytest.raises(LedgerRecordError, match="Sample 0 has a non-numeric synthesis.heating_time"):
+        ingest(path)
