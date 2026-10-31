@@ -23,12 +23,13 @@ On 2026-10-31 Hemanath delegated the pre-freeze decisions. They are written into
 - OPEN-05: the scoring rules, `protocol/scoring_rules.json`, on `dev` and cited by commit SHA.
 - OPEN-02 and OPEN-03: Adhi's review of the prices and budget copied from `protocol/prices_proposal.json` at `e5d81a2`, including whether the per-item cap is 31.0 or 31.3 units.
 - `protocol/frozen_settings.json` with exactly the frozen values, cited by commit SHA.
-- OPEN-18 (the `python -m kiln.data` check) and the P2 code-freeze commit SHA.
 
 The code items in `protocol.md` §17 table 2 (OPEN-23, OPEN-24, and the `evaluate.py` work for OPEN-08, OPEN-11 and OPEN-26) are not amendments either. The hashed text already says what that code must do.
 
-**May follow the Gate P commit as dated entries below (non-blocking, `protocol.md` §17 table 3).** None of these changes how a prediction is made, scored or budgeted:
+**May follow the Gate P commit as dated entries below (non-blocking confirmations only, `protocol.md` §17 table 3).** None of these changes how a prediction is made, scored or budgeted:
 
+- P2: the code-freeze commit SHA, recorded with the Gate P record.
+- OPEN-18: the `python -m kiln.data` rerun. A mismatch with the `protocol.md` §2.3 list is recorded here.
 - OPEN-22: the dataset attribution text.
 - The `gemini-3.8-flash` training cutoff, with its source (Adhi; `protocol.md` §11).
 - OPEN-16: CJ's confirmation of the webhook destination and readers, and Adhi's agreement to check receipts. These are needed before the P3 post.
