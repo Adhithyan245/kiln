@@ -145,6 +145,20 @@ class B0Tests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "at least one item"):
             run_b0([], [], self.config)
 
+    def test_batch_reads_generators_once_without_dropping_items(self):
+        items = [synthetic_item("syn-1"), synthetic_item("syn-2")]
+        decisions = run_b0(
+            (item for item in items),
+            (e for e in (energy("syn-1", -0.5), energy("syn-2", 0.25))),
+            self.config,
+        )
+        self.assertEqual([d.item_id for d in decisions], ["syn-1", "syn-2"])
+        self.assertEqual([d.reacts for d in decisions], [True, False])
+        with self.assertRaisesRegex(ValueError, "at least one item"):
+            run_b0((item for item in ()), [], self.config)
+        with self.assertRaisesRegex(ValueError, "duplicate item_id"):
+            run_b0((item for item in (items[0], items[0])), [energy("syn-1", -0.5)], self.config)
+
     def test_batch_keeps_item_order_and_reports_missing_entries(self):
         items = [synthetic_item("syn-2"), synthetic_item("syn-1")]
         decisions = run_b0(items, [energy("syn-1", -0.5), energy("syn-2", None, evidence=())], self.config)
@@ -216,6 +230,18 @@ class B0TTests(unittest.TestCase):
             run_b0_t([items[0], items[0]], config)
         with self.assertRaisesRegex(ValueError, "at least one item"):
             run_b0_t([], config)
+
+    def test_batch_reads_generators_once_without_dropping_items(self):
+        config = TammannConfig(tammann_fraction=0.5, require="either")
+        items = [synthetic_item("syn-1", mp_a=1000.0, mp_b=1500.0),
+                 synthetic_item("syn-2", mp_a=1000.0, mp_b=None)]
+        decisions = run_b0_t((item for item in items), config)
+        self.assertEqual([d.item_id for d in decisions], ["syn-1", "syn-2"])
+        self.assertTrue(decisions[0].reacts)
+        self.assertIsNone(decisions[1].reacts)
+        self.assertEqual(len(decisions[1].review_flags), 1)
+        with self.assertRaisesRegex(ValueError, "at least one item"):
+            run_b0_t((item for item in ()), config)
 
 
 class SchemaCompatibilityTests(unittest.TestCase):

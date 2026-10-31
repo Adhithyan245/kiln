@@ -16,7 +16,7 @@ units, not a probability. A missing input gives an undetermined decision with a
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -144,16 +144,18 @@ def _expect(value: object, cls: type, name: str) -> None:
         raise TypeError(f"{name} must be a {cls.__name__}, got {type(value).__name__}")
 
 
-def _index_items(items: Sequence[Item]) -> dict[str, Item]:
-    if not items:
+def _read_items(items: Iterable[Item]) -> list[Item]:
+    """Read ``items`` exactly once, so a generator is validated and decided in full."""
+    read = list(items)
+    if not read:
         raise ValueError("at least one item is required")
-    indexed: dict[str, Item] = {}
-    for item in items:
+    seen: set[str] = set()
+    for item in read:
         _expect(item, Item, "item")
-        if item.item_id in indexed:
+        if item.item_id in seen:
             raise ValueError(f"duplicate item_id: {item.item_id!r}")
-        indexed[item.item_id] = item
-    return indexed
+        seen.add(item.item_id)
+    return read
 
 
 def _absolute_c(value: float, name: str) -> float:
@@ -198,22 +200,23 @@ def b0_driving_force(item: Item, energy: DrivingForceInput, config: DrivingForce
 
 
 def run_b0(
-    items: Sequence[Item], energies: Iterable[DrivingForceInput], config: DrivingForceConfig
+    items: Iterable[Item], energies: Iterable[DrivingForceInput], config: DrivingForceConfig
 ) -> list[DrivingForceDecision]:
     """Apply B0 to every item, in order. Each item needs exactly one energy entry
     (use ``dE_ev_per_atom=None`` for an unavailable energy); entries for unknown
     items are rejected."""
-    indexed = _index_items(items)
+    items = _read_items(items)
+    item_ids = {item.item_id for item in items}
     supplied: dict[str, DrivingForceInput] = {}
     for energy in energies:
         _expect(energy, DrivingForceInput, "energy")
         if energy.item_id in supplied:
             raise ValueError(f"duplicate energy entry for {energy.item_id!r}")
         supplied[energy.item_id] = energy
-    missing = sorted(set(indexed) - set(supplied))
+    missing = sorted(item_ids - set(supplied))
     if missing:
         raise ValueError(f"no energy entry for {missing}; state dE_ev_per_atom=None for unavailable energies")
-    unknown = sorted(set(supplied) - set(indexed))
+    unknown = sorted(set(supplied) - item_ids)
     if unknown:
         raise ValueError(f"energy entries for unknown items: {unknown}")
     return [b0_driving_force(item, supplied[item.item_id], config) for item in items]
@@ -262,7 +265,6 @@ def b0_tammann(item: Item, config: TammannConfig) -> TammannDecision:
     )
 
 
-def run_b0_t(items: Sequence[Item], config: TammannConfig) -> list[TammannDecision]:
+def run_b0_t(items: Iterable[Item], config: TammannConfig) -> list[TammannDecision]:
     """Apply B0-T to every item, in order."""
-    _index_items(items)
-    return [b0_tammann(item, config) for item in items]
+    return [b0_tammann(item, config) for item in _read_items(items)]
