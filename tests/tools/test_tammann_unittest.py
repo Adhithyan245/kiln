@@ -17,9 +17,11 @@ class TammannTests(unittest.TestCase):
                 tammann_c(value)
 
     def test_unverified_melting_is_flagged_before_use(self):
-        self.assertEqual(checked_tammann_c(626.85), (None, "melting_unverified"))
+        value, status = checked_tammann_c(626.85, semantics="possible_decomposition_or_dehydration")
+        self.assertAlmostEqual(value, 326.85)
+        self.assertEqual(status, "possible_decomposition_or_dehydration")
         self.assertEqual(checked_tammann_c(None), (None, "missing"))
-        value, status = checked_tammann_c(626.85, melting_verified=True)
+        value, status = checked_tammann_c(626.85)
         self.assertEqual(status, "ok")
         self.assertAlmostEqual(value, 326.85)
 

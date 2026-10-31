@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import math
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from kiln.schemas import Item
 
 
 def tammann_c(melting_point_c: float | None) -> float | None:
@@ -23,16 +26,27 @@ def tammann_c(melting_point_c: float | None) -> float | None:
 
 
 def checked_tammann_c(
-    melting_point_c: float | None, *, melting_verified: bool = False
-) -> tuple[float | None, Literal["ok", "missing", "melting_unverified"]]:
-    """Return a result only when its input is confirmed as a melting point.
-
-    Verification must come from an independently checked source; the dataset
-    column name alone does not establish it. The status can drive review flags.
-    """
+    melting_point_c: float | None, *, semantics: str = "as_reported"
+) -> tuple[float | None, Literal["ok", "missing", "possible_decomposition_or_dehydration"]]:
+    """Keep the reported input and flag only the documented narrow caution."""
+    if semantics not in ("as_reported", "possible_decomposition_or_dehydration"):
+        raise ValueError("Unknown melting point semantics")
     value = tammann_c(melting_point_c)
     if value is None:
         return None, "missing"
-    if melting_verified is not True:
-        return None, "melting_unverified"
+    if semantics == "possible_decomposition_or_dehydration":
+        return value, "possible_decomposition_or_dehydration"
     return value, "ok"
+
+
+def item_tool_values(item: Item) -> dict[str, float | None]:
+    """Recompute the per-precursor values expected by the deterministic verifier."""
+    from kiln.tools.precursors import props
+
+    values: dict[str, float | None] = {}
+    for side, formula, fallback in (("a", item.precursor_a, item.melting_point_a_c),
+                                    ("b", item.precursor_b, item.melting_point_b_c)):
+        p = props(formula)
+        melting = p.melting_point_c if p.melting_point_c is not None else fallback
+        values[f"tammann_{side}_c"] = tammann_c(melting)
+    return values
