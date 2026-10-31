@@ -20,6 +20,8 @@
 | 12 | **Remote GB10 access** over Tailscale in userspace mode (no `sudo`, home folder only), to be stopped after judging | CJ, Adhi | `env/gb10/tailscale.sh` |
 | 13 | **LLM accounting:** Gemini thinking tokens count as output tokens (billed, and against the per-item token cap); prices for Gemini, Claude and OpenAI models are in `PRICES_USD_PER_MTOK` | Adhi | `src/kiln/agents/base.py` |
 | 14 | **Code freeze time** is the team's own deadline (plan §8), not the organizers'. It may move to at most 8:30 PM if the team agrees, so Night 2 still finishes by about 8 AM | Team decision needed to move it | — |
+| 15 | **Night 2 operator: Adhi** (CJ's laptop can't reach the GB10 remotely). The run stays on the GB10 in `tmux`; results come back through Adhi's laptop because the GB10 can't push to GitHub; Hemanath scores off the GB10 on Sunday morning (labels never go to the GB10). Held-out items come from the agent-visible items file (346 items: held-out records with no temperature are skipped, pending OPEN-13) | Adhi, CJ | `docs/night2-runbook.md` |
+| 16 | **Relaxation tier:** element references get a single point (relaxing molecular solids such as O2 doesn't converge and isn't meaningful); a near-hull competitor that doesn't converge is dropped and listed; a request is `not_converged` only if a reactant or a product along the a-b line fails | Adhi | `src/kiln/compute/tiers.py`, `docs/compute-decisions.md` |
 
 ## Proposed, not approved (don't build)
 
