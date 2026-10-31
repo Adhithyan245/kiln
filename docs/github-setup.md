@@ -46,17 +46,15 @@ gh api -X POST repos/OWNER/kiln/rulesets --input - << 'JSON'
   "conditions": { "ref_name": { "include": ["refs/heads/dev"], "exclude": [] } },
   "rules": [
     { "type": "deletion" },
-    { "type": "non_fast_forward" },
-    { "type": "pull_request", "parameters": {
-        "required_approving_review_count": 0,
-        "dismiss_stale_reviews_on_push": false,
-        "require_code_owner_review": false,
-        "require_last_push_approval": false,
-        "required_review_thread_resolution": false } }
+    { "type": "non_fast_forward" }
   ]
 }
 JSON
 ```
+
+`dev` takes direct pushes; this ruleset only blocks force pushes and deletion.
+
+Until rulesets are available (they need GitHub Pro on a private repo), `.github/workflows/guard-branches.yml` enforces the same rules by undoing pushes that break them.
 
 ## Discord alerts for pushes and pull requests
 
@@ -73,6 +71,6 @@ gh api -X POST repos/OWNER/kiln/hooks \
 Use a **different** Discord webhook from the night runner's, in a channel where Adhi gets pinged.
 
 ## Team workflow
-1. Everyone works on a feature branch named after themselves and the task, e.g. `cj/thermo-agent`.
-2. Open a PR into `dev`. Any teammate may merge it once it runs.
+1. Push to `dev` directly, or use a feature branch named after yourself and the task (e.g. `cj/thermo-agent`) and merge it into `dev`.
+2. Never force-push or delete `dev`.
 3. Only Adhi opens and merges PRs from `dev` into `main`, at each gate (Gate 0, Gate 1, code freeze, Sunday release).
