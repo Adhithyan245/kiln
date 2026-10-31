@@ -93,7 +93,7 @@ Each condition produces one `Prediction` per item (`schemas.py`). It has `p_reac
 
 **Scoring rules (OPEN-05): see `protocol/scoring_rules.json`.**
 
-> **TODO (OPEN-05):** `protocol/scoring_rules.json` is being written by another worker and is not on `dev` at this draft's base commit. Before the Gate P commit, the file must be on `dev`, cited here by its commit SHA, and match `kiln.scoring.score.score` and `score.provisional` at the P2 code-freeze commit. PR #7 makes `score` raise an error until those rules are frozen.
+> **TODO (OPEN-05):** `protocol/scoring_rules.json` is being written by another worker and is not on `dev` at this draft's base commit. Before the Gate P commit, the file must be on `dev`, cited here by its commit SHA, and match `kiln.scoring.score.score` and `score.provisional` at the P2 code-freeze commit. PR #7 makes `score` raise an error until those rules are frozen. This is **blocking** (§17, table 1): the rules decide `p_react` and `category`, which every metric depends on, so they are never settled by an amendment after the hash.
 
 ## 4. Conditions
 
@@ -156,7 +156,7 @@ That is 11 precursors, 3 of them held out (`CaCO3`, `Li2CO3`, `Na2CO3`). **Not o
 - `not_converged` and `failed` requests are logged as such and raise a `failed_computation` flag. They are never silently replaced or dropped (rule 9).
 - One budget level only (rule 11; `prices_proposal.json` reports that a second level does not fit Night 2).
 
-**Frozen tier prices and per-item compute budget (OPEN-03, OPEN-02).** Copied verbatim from `protocol/prices_proposal.json` at commit `e5d81a233c26fb7f80c53045cfca4cb6b87b982c` (Adhi, 2026-10-31 17:26 EDT, "price proposal from the GB10 rerun"). Measured on the GB10 (`results/gb10/profile_s0_fix.json`, 20 development pairs, seed 0, float32). **Adhi's review of these frozen values is pending.**
+**Frozen tier prices and per-item compute budget (OPEN-03, OPEN-02).** Copied verbatim from `protocol/prices_proposal.json` at commit `e5d81a233c26fb7f80c53045cfca4cb6b87b982c` (Adhi, 2026-10-31 17:26 EDT, "price proposal from the GB10 rerun"). Measured on the GB10 (`results/gb10/profile_s0_fix.json`, 20 development pairs, seed 0, float32). **Adhi's review of these frozen values is pending and blocking: it is completed, and any change written here, before the Gate P commit (§17, table 1).**
 
 | Item | Frozen value | Source |
 |---|---|---|
@@ -172,7 +172,7 @@ That is 11 precursors, 3 of them held out (`CaCO3`, `Li2CO3`, `Na2CO3`). **Not o
 | USD cap per item | None. `Budget.record_usd` records spend and does not cap it (interfaces additions) | — |
 | Unused budget carry-over between items | None; the budget is per item (**OPEN-20**) | `RunConfig` |
 
-- **Note for Adhi's review.** The proposal's rule is "budget per pair: one escalation path (cached_lookup + single_point + bounded_relaxation + decomposition_reeval)". At the frozen prices that path costs 0.1 + 1.0 + 30.0 + 0.2 = 31.3 units, while `max_compute_units_per_item` is 31.0. The value is copied as written. If Adhi confirms 31.3 was intended, the change is recorded before the Gate P commit or, after it, as a dated amendment.
+- **Note for Adhi's review.** The proposal's rule is "budget per pair: one escalation path (cached_lookup + single_point + bounded_relaxation + decomposition_reeval)". At the frozen prices that path costs 0.1 + 1.0 + 30.0 + 0.2 = 31.3 units, while `max_compute_units_per_item` is 31.0. The value is copied as written. The cap is **blocking**: Adhi settles 31.0 or 31.3 and it is written here before the Gate P commit. It is never settled by an amendment (§17, table 1).
 - `prices_proposal.json` sets no tool-call, token or round cap, so the `RunConfig` defaults are frozen and labelled as placeholders rather than new numbers being guessed.
 - **Night-wide stops** (`night2.toml` `[caps]`: 5,000,000 tokens, USD 20.0, 8.0 GPU-hours) are CJ's run-safety limits, marked provisional there, and are not part of the per-item budget. If one is breached and an item gets no prediction, OPEN-23 applies.
 - `protocol/frozen_settings.json`, which the Night 2 runner reads (`night2.toml`), must carry exactly these values. The runner reads `tier_prices` and the three `max_*` caps from it; it does not read `coordination_rounds`, so the `RunConfig` default of 3 applies (`runners/conditions.py`, `CAP_KEYS`).
@@ -276,7 +276,7 @@ Labels are never loaded before an **independently verified post** of the commitm
 
 ### Step 1: protocol commitment (Gate P)
 
-- **P1.** Owners close every `OPEN-nn` item and write the values here with their sources (§15). OPEN-06 and OPEN-07 are a hard prerequisite: the Gate P commit is not made while they are pending, unless the team has recorded the explicit decision described in §6. Other items still pending at the hash follow §17.
+- **P1.** Owners close every `OPEN-nn` item and write the values here with their sources (§15). OPEN-06 and OPEN-07 are a hard prerequisite: the Gate P commit is not made while they are pending, unless the team has recorded the explicit decision described in §6. Every blocking item in §17 (table 1) is closed and written here before the Gate P commit. Only §17's non-blocking items (table 3) may follow as dated amendments.
 - **P2.** Record the code-freeze commit SHA for scoring, verifier, review flags, compute tiers, agents and runner.
 - **P3.** Commit the closed protocol and push the commit to `dev`, which blocks force-pushes and deletion (`docs/github-setup.md`), so the commit stays reachable. That commit is the **Gate P commit**. The digest is the SHA-256 of `protocol/protocol.md` as stored in that commit, `git cat-file blob <gate-p-commit>:protocol/protocol.md | shasum -a 256`. It is never taken from a checked-out copy, so line endings and checkout settings cannot change it. Post the full Gate P commit SHA **together with** the digest through the channel in **OPEN-16** (below), and verify the receipt independently. Anyone can check the commitment by rerunning that command against the posted commit.
 - **P4.** Only after P3 may held-out runs start. Development runs may happen earlier.
@@ -371,10 +371,10 @@ Rows marked **decided 2026-10-31 by Hemanath, delegated** were filled in by an a
 | ID | Decision needed | Owner | Blocks | Status and decision |
 |---|---|---|---|---|
 | OPEN-01 | Which of C2 and C4 is the need-board collective and which is isolated specialists; what "isolated" means | Adhi | §4, every contrast | **Decided 2026-10-31 by Hemanath, delegated.** As the runner codes it: C2 isolated (own boards, needs suppressed), C4 collective (one board, needs delivered) (§4.1) |
-| OPEN-02 | Locked per-item budget: compute units, tool calls, tokens, coordination rounds, USD cap | Adhi (profiling) and team | §5, Gate P | **Decided 2026-10-31 by Hemanath, delegated.** 31.0 compute units, verbatim from `prices_proposal.json` at `e5d81a2`; 12 tool calls, 40,000 tokens and 3 rounds as labelled placeholders; no USD cap per item (§5). Adhi's review pending, including the 31.0 versus 31.3 note |
-| OPEN-03 | Frozen price per compute tier | Adhi proposes from profiling; Hemanath freezes | §5, Gate P | **Decided 2026-10-31 by Hemanath, delegated.** Verbatim from `prices_proposal.json` at `e5d81a2`: 0.1, 1.0, 30.0 and 0.2 units (§5). Adhi's review pending |
+| OPEN-02 | Locked per-item budget: compute units, tool calls, tokens, coordination rounds, USD cap | Adhi (profiling) and team | §5, Gate P | **Decided 2026-10-31 by Hemanath, delegated.** 31.0 compute units, verbatim from `prices_proposal.json` at `e5d81a2`; 12 tool calls, 40,000 tokens and 3 rounds as labelled placeholders; no USD cap per item (§5). Adhi's review pending and **blocking**, including the 31.0 versus 31.3 cap (§17, table 1) |
+| OPEN-03 | Frozen price per compute tier | Adhi proposes from profiling; Hemanath freezes | §5, Gate P | **Decided 2026-10-31 by Hemanath, delegated.** Verbatim from `prices_proposal.json` at `e5d81a2`: 0.1, 1.0, 30.0 and 0.2 units (§5). Adhi's review pending and **blocking** (§17, table 1) |
 | OPEN-04 | Gemini model id and settings; number of seeds per condition and how they are combined | Adhi and team | §4, §8, §11 | **Decided 2026-10-31 by Hemanath, delegated.** `gemini-3.8-flash`, temperature 0, fallback for all conditions or none; 3 seeds, each reported plus the mean (§4.1, §5.1, §8). Training cutoff: Adhi adds |
-| OPEN-05 | Scoring rules: `p_react`, category boundaries, cause and fix, evidence selection, in `score.score` and `score.provisional` | Hemanath | §3.3, every metric | **Decided 2026-10-31 by Hemanath, delegated.** The rules are `protocol/scoring_rules.json`. TODO: that file is not on `dev` yet; cite it by commit before the Gate P commit (§3.3) |
+| OPEN-05 | Scoring rules: `p_react`, category boundaries, cause and fix, evidence selection, in `score.score` and `score.provisional` | Hemanath | §3.3, every metric | **Pending; blocking for the Gate P commit.** The rules are to be `protocol/scoring_rules.json`, which is not on `dev` yet, so nothing about their content has been decided. The file must be on `dev` and cited in §3.3 by commit SHA before the Gate P commit; it can never be settled by an amendment (§17, table 1) |
 | OPEN-06 | Review-flag thresholds (MLIP versus Materials Project disagreement, applicability limits) | Annamayya; values recorded here | §6, coverage | **Pending Annamayya; hard prerequisite for the Gate P commit.** No shared rule until she confirms: no thresholds, so no conflict flag. Under that state C2 and C4 are identical (§6) |
 | OPEN-07 | Specialist escalation rules and margins | Annamayya; recorded here | §6, §9 | **Pending Annamayya; hard prerequisite for the Gate P commit.** No shared rule until she confirms `docs/escalation-rule.md`. With both margins null, no agent posts a need, C2 and C4 are identical, and no condition buys a GPU tier. The only alternative is an explicit team decision, recorded in `docs/plan-changes.md`, to freeze that design knowingly (§6) |
 | OPEN-08 | B0 threshold; mapping a B0 or B0-T decision to `p_react` and category; charging of B0's cached lookups | Hemanath | §4.2 | **Decided 2026-10-31 by Hemanath, delegated.** B0 at 0 eV/atom; no mapping, baselines reported by AUROC of their ranking score in their own table; lookups charged the frozen `cached_lookup` price (§4.2) |
@@ -385,7 +385,7 @@ Rows marked **decided 2026-10-31 by Hemanath, delegated** were filled in by an a
 | OPEN-13 | Handling of the 54 records with no heating temperature | Hemanath (proposal 0001 §6 adds Adhi) | §2.4, §7 denominator | **Decided 2026-10-31 by Hemanath, delegated.** Proposal 0001 §6 Option 2: documented exclusion before the freeze (40 with no synthesis object, 14 with a null heating temperature), leaving 346 held-out items as PC15 states (§2.4) |
 | OPEN-14 | Primary endpoint, decision rule, multiplicity, secondary metrics, subgroups, extra allocation tables | Hemanath and team | §7, §8, §9 | **Decided 2026-10-31 by Hemanath, delegated.** Primary: paired ΔAUROC, C4 minus C1, on all evaluated held-out items, mean over 3 seeds; a tie is reported as a tie; the 9 per-precursor differences are shown; everything else secondary (§8) |
 | OPEN-15 | Bootstrap for overlapping precursor clusters: scheme, replicates, interval type and level, seed | Hemanath | §8 | **Decided 2026-10-31 by Hemanath, delegated.** No bootstrap: no interval, p-value or significance claim is reported (§8) |
-| OPEN-16 | Posting channel and receipt proof for protocol and prediction hashes | Hemanath, CJ and Adhi | Gate P, Gate H | **Decided 2026-10-31 by Hemanath, delegated (draft); pending CJ and Adhi confirmation.** Post through `KILN_PREREG_WEBHOOK`; Adhi checks receipts independently, Hemanath checks any post Adhi makes (§10) |
+| OPEN-16 | Posting channel and receipt proof for protocol and prediction hashes | Hemanath, CJ and Adhi | Gate P, Gate H | **Decided 2026-10-31 by Hemanath, delegated (draft); pending CJ and Adhi confirmation, which is non-blocking for the commit but needed before the P3 post (§17, table 3).** Post through `KILN_PREREG_WEBHOOK`; Adhi checks receipts independently, Hemanath checks any post Adhi makes (§10) |
 | OPEN-17 | Definition of `changed_prediction`, and who fills it | Hemanath and CJ | §9 | **Decided 2026-10-31 by Hemanath, delegated.** The provisional four-class category differs before and after the request; `replay_changes` fills it before unblinding (§9) |
 | OPEN-18 | Held-out precursor list as recorded at freeze; whether first-element grouping is an acceptable spread | Hemanath | §2.3 | **Decided 2026-10-31 by Hemanath, delegated.** CaCO3, Fe2O3, HfO2, Li2CO3, Na2CO3, NiO, SiO2, TiO2, WO3, from the `split` field of the items file; grouping accepted with its caveat (§2.3) |
 | OPEN-19 | Opaque item ids for agents; memorization probe | Hemanath | §11 | **Decided 2026-10-31 by Hemanath, delegated.** Probe is N2 per rule 11; opaque ids not adopted, listed as a limitation (§11) |
@@ -403,18 +403,32 @@ Amendments live in `protocol/amendments.md`, not here, so this file's bytes matc
 
 ## 17. Still to do before the Gate P commit
 
-**Hard prerequisite (cannot be deferred).** The Gate P commit is not made until Annamayya decides OPEN-06 and OPEN-07 (confirming or rejecting `docs/escalation-rule.md`, with T_rxn and T_disagree from Adhi's profiling) and the values are written in §6. The only alternative is an explicit team decision, recorded in `docs/plan-changes.md` with who approved it, to freeze knowingly a design in which C2 and C4 are identical and the need board is never used (§6). This item never moves to `protocol/amendments.md`.
+The Gate P digest commits only to what is written in this file, or cited from it by commit SHA, at the Gate P commit. So anything that decides how predictions are made, scored or budgeted is **blocking**: it is closed and written here first, and it can never be settled later by an amendment. Only the non-blocking items in table 3 may follow as dated entries in `protocol/amendments.md`.
 
-The rows below are confirmations or code facts, not analysis choices. Any of them still open at the hash is recorded in `protocol/amendments.md` as a dated entry, labelled before or after unblinding.
+**1. Blocking: closed and written into this file (or cited by commit SHA) before the Gate P commit.** None of these may move to `protocol/amendments.md`.
 
 | What | Who | Section |
 |---|---|---|
-| Put `protocol/scoring_rules.json` on `dev` and cite its commit (OPEN-05) | Hemanath and the scoring worker | §3.3 |
-| Confirm the webhook destination and readers, and agree to check receipts (OPEN-16) | CJ, Adhi | §10 |
-| Review the frozen prices and budget, including 31.0 versus 31.3 units (OPEN-02, OPEN-03) | Adhi | §5 |
-| Write `protocol/frozen_settings.json` with the §5 values | CJ (runner), checked by Adhi | §5 |
-| In `evaluate.py`: the explicit hard-subset formula list (OPEN-26), the category normalization (OPEN-11) and baseline AUROC from a ranking score (OPEN-08) | Hemanath | §3.1, §4.2, §4.3 |
-| Add `Budget.item_cost` and the tool APIs; update interfaces step 7 (OPEN-24) | Adhi, Annamayya, team | §6 |
-| Score unreached or crashed items on empty evidence before hashing (OPEN-23) | CJ | §6 |
-| Rerun `python -m kiln.data` and check it prints the §2.3 list (OPEN-18) | Hemanath | §2.3 |
-| Record the P2 code-freeze commit SHA | Hemanath | §10 |
+| OPEN-06 and OPEN-07: Annamayya decides the escalation rule and flag thresholds (confirming or rejecting `docs/escalation-rule.md`, with T_rxn and T_disagree from Adhi's profiling) and the values are written in §6. The only alternative is an explicit team decision, recorded in `docs/plan-changes.md` with who approved it, to freeze knowingly the null-margin design in which C2 and C4 are identical and the need board is never used | Annamayya; Adhi for the values; or the team | §6 |
+| OPEN-05: the scoring rules. `protocol/scoring_rules.json` is on `dev`, cited in §3.3 by its commit SHA, and matches `score.score` and `score.provisional` at the P2 commit | Hemanath and the scoring worker | §3.3 |
+| OPEN-02 and OPEN-03: Adhi reviews the frozen prices and budget, and the per-item cap (31.0 or 31.3 units) is settled and written in §5 | Adhi | §5 |
+| `protocol/frozen_settings.json` is written with exactly the §5 values and the OPEN-06/07 thresholds (or their nulls), and is cited by commit SHA | CJ (runner), checked by Adhi | §5, §6 |
+| OPEN-18: rerun `python -m kiln.data` and check it prints the §2.3 list | Hemanath | §2.3 |
+| P2: record the code-freeze commit SHA for scoring, verifier, review flags, compute tiers, agents and runner | Hemanath | §10 |
+
+**2. Code that implements text already fixed here.** These are not decisions, because this file already states what the code must do and the Gate P digest commits to that text. They are not amendments either: the code must match this text by the stated point, and any departure from the text is reported as a deviation.
+
+| What | Who | Due | Section |
+|---|---|---|---|
+| OPEN-23: the runner scores crashed or unreached items on empty evidence before hashing | CJ | P2 commit | §6 |
+| OPEN-24: `Budget.item_cost`, the tool APIs, and the interfaces step 7 text. While they are missing, Kinetics and Precursor artifacts stay `inconclusive`, as §6 states | Adhi, Annamayya, team | P2 commit | §6 |
+| In `evaluate.py`: the explicit hard-subset formula list (OPEN-26), the category normalization (OPEN-11) and baseline AUROC from a ranking score (OPEN-08). The hard-subset definition hash is posted before labels load | Hemanath | Before Gate H | §3.1, §4.2, §4.3 |
+
+**3. Non-blocking: may follow the Gate P commit as dated entries in `protocol/amendments.md`.** None of these changes how a prediction is made, scored or budgeted.
+
+| What | Who | Section |
+|---|---|---|
+| OPEN-22: the dataset attribution text | Hemanath | §14 |
+| The documented training cutoff of `gemini-3.8-flash`, with its source | Adhi | §11 |
+| OPEN-16: confirmation of the webhook destination and readers, and of Adhi as receipt checker. Needed before the P3 post, not before the commit | CJ, Adhi | §10 |
+| OPEN-19: opaque item ids, only if that code lands before the held-out runs | CJ | §11 |

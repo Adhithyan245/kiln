@@ -17,16 +17,22 @@ Gate P has not happened. `protocol/protocol.md` is still a draft and has not bee
 
 On 2026-10-31 Hemanath delegated the pre-freeze decisions. They are written into `protocol.md` itself (§15, rows marked "decided 2026-10-31 by Hemanath, delegated"), because decisions made before the Gate P commit belong in the hashed file, not here. Hemanath may veto any of them before he makes the Gate P commit.
 
-**Never deferred here: OPEN-06 and OPEN-07.** They are a hard prerequisite for the Gate P commit (`protocol.md` §6, §10 P1, §17). Without them no agent posts a need, C2 and C4 are identical, and the need board is never used. The Gate P commit waits for Annamayya's decision, or for an explicit team decision in `docs/plan-changes.md` to freeze that design knowingly. They never get an amendment entry here in place of that.
+**Never deferred here (blocking, `protocol.md` §17 table 1).** These decide how predictions are made, scored or budgeted. The Gate P digest commits only to what `protocol.md` says at the Gate P commit, so each must be closed and written there (or cited from it by commit SHA) first. None of them ever gets an amendment entry here in place of that.
 
-Other items that `protocol.md` §17 lists as still to do. If one is still open when the Gate P commit is made, it gets a dated entry below instead:
-
-- OPEN-05: `protocol/scoring_rules.json` on `dev`, cited by commit.
-- OPEN-16: CJ's confirmation of the webhook destination, and Adhi's agreement to check receipts.
+- OPEN-06 and OPEN-07: Annamayya's escalation rule and flag thresholds, or an explicit team decision in `docs/plan-changes.md` to freeze the null-margin design knowingly. Under that design no agent posts a need, C2 and C4 are identical, and the need board is never used.
+- OPEN-05: the scoring rules, `protocol/scoring_rules.json`, on `dev` and cited by commit SHA.
 - OPEN-02 and OPEN-03: Adhi's review of the prices and budget copied from `protocol/prices_proposal.json` at `e5d81a2`, including whether the per-item cap is 31.0 or 31.3 units.
-- The `gemini-3.8-flash` training cutoff, with its source (Adhi; `protocol.md` §11).
+- `protocol/frozen_settings.json` with exactly the frozen values, cited by commit SHA.
+- OPEN-18 (the `python -m kiln.data` check) and the P2 code-freeze commit SHA.
+
+The code items in `protocol.md` §17 table 2 (OPEN-23, OPEN-24, and the `evaluate.py` work for OPEN-08, OPEN-11 and OPEN-26) are not amendments either. The hashed text already says what that code must do.
+
+**May follow the Gate P commit as dated entries below (non-blocking, `protocol.md` §17 table 3).** None of these changes how a prediction is made, scored or budgeted:
+
 - OPEN-22: the dataset attribution text.
-- Opaque item ids, only if that code lands before the held-out runs (OPEN-19).
+- The `gemini-3.8-flash` training cutoff, with its source (Adhi; `protocol.md` §11).
+- OPEN-16: CJ's confirmation of the webhook destination and readers, and Adhi's agreement to check receipts. These are needed before the P3 post.
+- OPEN-19: opaque item ids, only if that code lands before the held-out runs.
 
 ## Amendments
 
