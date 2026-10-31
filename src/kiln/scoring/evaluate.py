@@ -44,6 +44,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+from pydantic import ValidationError
+
 from kiln.schemas import Category, ComputeRequest, ComputeTier, Item, Label, Prediction
 
 
@@ -352,6 +354,25 @@ def _bootstrap(samples: int, seed: int) -> dict[str, Any]:
         "intervals": {},
         "reason": "Unavailable: an agreed and validated bootstrap method for overlapping precursor clusters is required.",
     }
+
+
+def read_labels_jsonl(path: str | Path) -> list[Label]:
+    """Read a JSON Lines label file; pass it to ``evaluate`` only as the ``load_labels`` callback.
+
+    Kept in this module because it is the only one allowed to read labels (AGENTS.md rule 1).
+    Errors name the line number and fields only, never label values.
+    """
+    labels = []
+    with Path(path).open(encoding="utf-8") as stream:
+        for number, line in enumerate(stream, 1):
+            if not line.strip():
+                continue
+            try:
+                labels.append(Label.model_validate_json(line))
+            except ValidationError as exc:
+                names = ", ".join(sorted({".".join(map(str, e["loc"])) or e["type"] for e in exc.errors()}))
+                raise ValueError(f"labels line {number} failed Label validation for {names}") from None
+    return labels
 
 
 def evaluate(
