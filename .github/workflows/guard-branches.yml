@@ -1,0 +1,66 @@
+name: guard-branches
+# Stand-in for the lock-main and protect-dev rulesets until GitHub Pro is active
+# (rulesets need Pro on private repos). Any change to main or dev that breaks the rules
+# below is undone: the pushed commits go to a rescued/ branch and the branch is reset.
+#   dev:  changes only through merged pull requests; no force pushes, no deletion.
+#   main: only a pull request from dev, merged by the admin; no force pushes, no deletion.
+# Set the repo variable MAIN_ADMIN to change who may merge into main (default: Adhithyan245).
+on:
+  push:
+    branches: [main, dev]
+permissions:
+  contents: write
+  pull-requests: read
+concurrency:
+  group: guard-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Undo pushes that break the branch rules
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          ACTOR: ${{ github.actor }}
+          ADMIN: ${{ vars.MAIN_ADMIN || 'Adhithyan245' }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+          DELETED: ${{ github.event.deleted }}
+          FORCED: ${{ github.event.forced }}
+        run: |
+          zero=0000000000000000000000000000000000000000
+          undo() {
+            if [ "$DELETED" = "true" ]; then
+              gh api -X POST "repos/$REPO/git/refs" -f ref="refs/heads/$BRANCH" -f sha="$BEFORE" > /dev/null
+              echo "::error::$1 '$BRANCH' has been restored."
+            else
+              rescue="rescued/$ACTOR-${AFTER:0:7}"
+              gh api -X POST "repos/$REPO/git/refs" -f ref="refs/heads/$rescue" -f sha="$AFTER" > /dev/null
+              if [ "$BEFORE" != "$zero" ]; then
+                gh api -X PATCH "repos/$REPO/git/refs/heads/$BRANCH" -f sha="$BEFORE" -F force=true > /dev/null
+              fi
+              echo "::error::$1 Your commits were moved to '$rescue' and '$BRANCH' was reset. Work on a feature branch and open a PR into dev."
+            fi
+            exit 1
+          }
+
+          [ "$DELETED" = "true" ] && undo "Deleting '$BRANCH' is not allowed."
+          [ "$FORCED" = "true" ] && undo "Force pushes to '$BRANCH' are not allowed."
+
+          # A pull request merge shows up as a push whose head commit is the PR's merge commit.
+          head=""
+          for attempt in 1 2 3; do
+            head=$(gh api "repos/$REPO/commits/$AFTER/pulls" --jq \
+              "[.[] | select(.merged_at != null and .base.ref == \"$BRANCH\" and .merge_commit_sha == \"$AFTER\")][0].head.ref // \"\"") || head=""
+            [ -n "$head" ] && break
+            sleep 5
+          done
+          [ -z "$head" ] && undo "Direct pushes to '$BRANCH' are not allowed; changes go through pull requests."
+
+          if [ "$BRANCH" = "main" ]; then
+            [ "$head" != "dev" ] && undo "Only dev can be merged into main (this PR came from '$head')."
+            [ "$ACTOR" != "$ADMIN" ] && undo "Only $ADMIN can merge into main."
+          fi
+          echo "OK: PR from '$head' merged into '$BRANCH' by $ACTOR."
