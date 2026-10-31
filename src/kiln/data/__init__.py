@@ -62,6 +62,8 @@ class _ProjectionReader:
 
     def value(self, selection: Any = None) -> Any:
         self.whitespace()
+        if selection is True and self.char in ('{', '['):
+            raise ValueError("Selected ledger value must be a scalar, not a container")
         if self.char == '{':
             self.advance()
             result = {} if isinstance(selection, dict) else None

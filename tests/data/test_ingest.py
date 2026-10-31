@@ -45,6 +45,21 @@ def test_selection_is_independent_of_record_order(tmp_path):
     assert {i.item_id: i.split for i in forward} == {i.item_id: i.split for i in reverse}
 
 
+@pytest.mark.parametrize("field,value", [
+    ("melting_point_c", {"value": 500, "unit": "C"}),
+    ("heating_time", [1, 2]),
+])
+def test_rejects_container_in_selected_optional_field(tmp_path, field, value):
+    path = write_ledger(tmp_path)
+    document = json.loads(path.read_text())
+    sample = document["samples"][0]
+    target = sample["precursors"][0] if field == "melting_point_c" else sample["synthesis"]
+    target[field] = value
+    path.write_text(json.dumps(document))
+    with pytest.raises(ValueError, match="Selected ledger value must be a scalar"):
+        ingest(path)
+
+
 def test_rejects_bad_records_and_split(tmp_path):
     path = write_ledger(tmp_path)
     with pytest.raises(ValueError, match="split must"):
