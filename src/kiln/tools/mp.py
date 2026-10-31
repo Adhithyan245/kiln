@@ -8,6 +8,7 @@ Agents never call this module directly for energies: the compute service's `cach
 `decomposition_reeval` tiers do, so every lookup is charged and logged (AGENTS.md rule 8).
 
     python -m kiln.tools.mp fetch --all-pairs      # every chemical system in dev + held-out items
+    python -m kiln.tools.mp fetch --precursors-file precursors.txt   # no ledger on this host
     python -m kiln.tools.mp fetch --chemsys Ca-O-Ti
 """
 from __future__ import annotations
@@ -129,17 +130,35 @@ def _all_pair_chemsys() -> list[str]:
     return sorted(systems)
 
 
+def pair_chemsys_from_precursors(formulas: list[str]) -> list[str]:
+    """Chemical systems of every pair of the given precursors (no ledger needed on this host)."""
+    unique = sorted(set(formulas))
+    return sorted({chemsys_for(a, b) for i, a in enumerate(unique) for b in unique[i + 1:]})
+
+
+def _read_precursors(path: Path) -> list[str]:
+    lines = [l.split("#", 1)[0].strip() for l in path.read_text(encoding="utf-8").splitlines()]
+    return [l for l in lines if l]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m kiln.tools.mp")
     sub = parser.add_subparsers(dest="cmd", required=True)
     fetch = sub.add_parser("fetch", help="download chemical systems into the cache (resumable)")
     group = fetch.add_mutually_exclusive_group(required=True)
-    group.add_argument("--all-pairs", action="store_true")
+    group.add_argument("--all-pairs", action="store_true", help="pairs from kiln.data (needs the ledger here)")
+    group.add_argument("--precursors-file", type=Path,
+                       help="one precursor formula per line; fetches every pair's chemical system")
     group.add_argument("--chemsys", action="append")
     fetch.add_argument("--cache-dir", type=Path, default=CACHE_DIR)
     args = parser.parse_args(argv)
 
-    systems = _all_pair_chemsys() if args.all_pairs else sorted(set(args.chemsys))
+    if args.all_pairs:
+        systems = _all_pair_chemsys()
+    elif args.precursors_file:
+        systems = pair_chemsys_from_precursors(_read_precursors(args.precursors_file))
+    else:
+        systems = sorted(set(args.chemsys))
     failed = 0
     for n, chemsys in enumerate(systems, 1):
         try:

@@ -15,6 +15,14 @@ def test_chemsys_is_sorted_and_deduplicated() -> None:
     assert mp.chemsys_for("Li2CO3", "TiO2") == "C-Li-O-Ti"
 
 
+def test_pair_chemsys_from_precursor_list(tmp_path: Path) -> None:
+    listing = tmp_path / "precursors.txt"
+    listing.write_text("# made-up list\nCaO\nTiO2\nLi2CO3  # carbonate\n\nCaO\n", encoding="utf-8")
+    formulas = mp._read_precursors(listing)
+    assert formulas == ["CaO", "TiO2", "Li2CO3", "CaO"]
+    assert mp.pair_chemsys_from_precursors(formulas) == ["C-Ca-Li-O", "C-Li-O-Ti", "Ca-O-Ti"]
+
+
 def test_reaction_energy_finds_the_favoured_product() -> None:
     result = mp.reaction_energy("CaO", "TiO2", ca_ti_o_entries())
     assert result.products == "CaTiO3"
