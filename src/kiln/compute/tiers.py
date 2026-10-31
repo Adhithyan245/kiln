@@ -421,12 +421,15 @@ def main(argv: list[str] | None = None) -> int:
     fc.add_argument("--settings", type=Path, default=TIER_SETTINGS_PATH)
     fc.add_argument("--device", help="override the settings' device (cpu for a dry run)")
     fc.add_argument("--max-steps", type=int, help="override the step cap")
+    fc.add_argument("--dtype", choices=["float32", "float64"], help="override the settings' precision")
     fc.add_argument("--out", type=Path, default=FIRST_CALCS_PATH)
     args = parser.parse_args(argv)
 
     settings = dict(json.loads(args.settings.read_text(encoding="utf-8"))["bounded_relaxation"])
     if args.device:
         settings["device"] = args.device
+    if args.dtype:
+        settings["dtype"] = args.dtype
     if args.max_steps is not None:
         settings["max_steps"] = args.max_steps
     if args.structure_file:
