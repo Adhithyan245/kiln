@@ -1,0 +1,71 @@
+{
+  "status": "PROPOSAL (Adhi, compute science). Hemanath freezes prices and budget in protocol.md at code freeze.",
+  "created_at": "2026-10-31T20:55:24.677566+00:00",
+  "measured_on": {
+    "host": "promaxgb10-99ea",
+    "machine": "aarch64",
+    "source": "results/gb10/profile_s0.json"
+  },
+  "compute_unit": "median single_point GPU-seconds = 0.5270888755003398 s",
+  "tier_prices": {
+    "cached_lookup": 0.1,
+    "single_point": 1.0,
+    "bounded_relaxation": 50.0,
+    "decomposition_reeval": 0.2
+  },
+  "max_compute_units_per_item": 51.0,
+  "night2": {
+    "worst_case_gpu_seconds_per_item": 26.88,
+    "main_run_worst_case_gpu_hours": 33.06,
+    "usable_gpu_hours": 7.7,
+    "main_run_fits": false,
+    "second_budget_level_fits": false,
+    "assumptions": "369 held-out items x 4 conditions x 3 seeds; 11.0 h x 1 GPU worker(s), 70% of it planned for"
+  },
+  "measurements": {
+    "cached_lookup": {
+      "n": 20,
+      "status": {
+        "ok": 20,
+        "cached": 0,
+        "not_converged": 0,
+        "failed": 0
+      },
+      "median_gpu_seconds": 0.0,
+      "p90_gpu_seconds": 0.0,
+      "median_relative_to_single_point": 0.0
+    },
+    "single_point": {
+      "n": 20,
+      "status": {
+        "ok": 20,
+        "cached": 0,
+        "not_converged": 0,
+        "failed": 0
+      },
+      "median_gpu_seconds": 0.5270888755003398,
+      "p90_gpu_seconds": 0.7365303240003414,
+      "median_relative_to_single_point": 1.0
+    },
+    "bounded_relaxation": {
+      "n": 20,
+      "status": {
+        "ok": 0,
+        "cached": 0,
+        "not_converged": 20,
+        "failed": 0
+      },
+      "median_gpu_seconds": 26.240973459999623,
+      "p90_gpu_seconds": 149.77689108400045,
+      "median_relative_to_single_point": 49.78472261455024
+    }
+  },
+  "rules": [
+    "1 compute unit = median single_point GPU-seconds",
+    "GPU tiers: median GPU-seconds in units, never below the floor",
+    "cached_lookup: the floor (caching never makes a condition cheaper)",
+    "decomposition_reeval: two MP reaction evaluations (2 x floor) plus any measured GPU time",
+    "budget per pair: one escalation path (cached_lookup + single_point + bounded_relaxation + decomposition_reeval)",
+    "second budget level: only if a full second main run also fits Night 2"
+  ]
+}
