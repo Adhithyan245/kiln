@@ -44,7 +44,7 @@ fi
 # Kiln's extras, constrained to the versions already installed.
 constraints="$(mktemp)"
 "$UV" pip freeze --python "$VENV/bin/python" | grep -v '^-e ' > "$constraints"
-"${PIP[@]}" --constraint "$constraints" pymatgen mp-api pytest
+"${PIP[@]}" --constraint "$constraints" pymatgen mp-api pytest "google-genai>=1.0" "anthropic>=0.40" "openai>=1.50"
 "${PIP[@]}" --no-deps -e "$KILN_DIR"
 rm -f "$constraints"
 
