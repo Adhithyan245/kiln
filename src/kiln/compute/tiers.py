@@ -133,7 +133,14 @@ def _on_join(comp: Composition, a: Composition, b: Composition, tol: float = 1e-
 
 
 def _phase_set(a: str, b: str, settings: dict[str, Any], cache_dir: Path) -> list[ComputedEntry]:
+    """The phase list of `_phase_selection` (see there)."""
+    return _phase_selection(a, b, settings, cache_dir)[0]
+
+
+def _phase_selection(a: str, b: str, settings: dict[str, Any],
+                     cache_dir: Path) -> tuple[list[ComputedEntry], set[str], set[str]]:
     """The phases the a-b reaction energy depends on, not the whole chemical system.
+    Returns (phases, required ids, elemental-reference ids); the rest are near-hull competitors.
 
     The interface reaction energy between a and b depends only on the convex hull along the a-b
     mixing line. So the set is: (1) the stable phases every a-b mixture decomposes into, at each
@@ -166,8 +173,10 @@ def _phase_set(a: str, b: str, settings: dict[str, Any], cache_dir: Path) -> lis
         if not matching:
             raise ValueError(f"no Materials Project entry for precursor {formula}")
         add(min(matching, key=lambda e: e.energy_per_atom))
+    required = set(keep)
     for e in pd.el_refs.values():                                  # (3) elemental references
         add(e)
+    elements = {str(e.entry_id) for e in pd.el_refs.values()} - required
     competitors = sorted((e for e in entries if str(e.entry_id) not in keep
                           and pd.get_e_above_hull(e) <= window and _on_join(e.composition, ca, cb)),
                          key=pd.get_e_above_hull)
@@ -175,13 +184,13 @@ def _phase_set(a: str, b: str, settings: dict[str, Any], cache_dir: Path) -> lis
         if len(keep) >= cap:
             break
         add(e)
-    return list(keep.values())
+    return list(keep.values()), required, elements
 
 
 def _mlip(tier: ComputeTier, inputs: dict[str, Any], settings: dict[str, Any], cache_dir: Path,
           calculator_factory: CalculatorFactory) -> BackendResult:
     a, b = _pair(inputs)
-    phases = _phase_set(a, b, settings, cache_dir)
+    phases, required, elements = _phase_selection(a, b, settings, cache_dir)
     limit = int(settings["max_structures"])
     if len(phases) > limit:
         return BackendResult(ComputeStatus.failed,
@@ -193,19 +202,34 @@ def _mlip(tier: ComputeTier, inputs: dict[str, Any], settings: dict[str, Any], c
                              {"error": f"structures above max_atoms={max_atoms}: {', '.join(map(str, too_big))}"})
 
     relax = tier == ComputeTier.bounded_relaxation
-    run = (bounded_relaxation if relax else single_point)(
-        [e.structure for e in phases], settings, calculator_factory=calculator_factory)
-    failed = [f"{e.entry_id}: {r.error}" for e, r in zip(phases, run.results) if r.status == ComputeStatus.failed]
+    # Elemental references are phase-diagram corners, not products: relaxing a molecular solid such
+    # as O2 with a variable cell does not converge and means nothing here, so they get a single point.
+    is_element = [str(e.entry_id) in elements for e in phases]
+    results: list[StructureResult | None] = [None] * len(phases)
+    for flag, fn in ((True, single_point), (False, bounded_relaxation if relax else single_point)):
+        idx = [i for i, el in enumerate(is_element) if el == flag]
+        if idx:
+            run = fn([phases[i].structure for i in idx], settings, calculator_factory=calculator_factory)
+            for i, r in zip(idx, run.results):
+                results[i] = r
+    failed = [f"{e.entry_id}: {r.error}" for e, r in zip(phases, results) if r.status == ComputeStatus.failed]
     if failed:
         return BackendResult(ComputeStatus.failed, {"error": "; ".join(failed)})
-    totals = [float(r.energy_ev) for r in run.results]       # raw MLIP totals, eV, for each cell
-    mlip_entries = [corrected_entry(e, total) for e, total in zip(phases, totals)]
-    not_converged = [str(e.entry_id) for e, r in zip(phases, run.results) if r.status == ComputeStatus.not_converged]
-    steps_used = max((r.steps or 0 for r in run.results), default=0)
-    worst_phase = max(abs(d.mlip_minus_mp_ev_per_atom) for d in phase_differences(phases, totals))
+    not_converged = [str(e.entry_id) for e, r in zip(phases, results) if r.status == ComputeStatus.not_converged]
+    # A competitor that did not converge has no trustworthy energy: it leaves both the MLIP and the MP
+    # phase sets (so they stay comparable) and is listed. The request is not_converged only if a phase
+    # the reaction energy depends on (a reactant or a product along the a-b line) did not converge.
+    dropped = [i for i in not_converged if i not in required]
+    blocking = [i for i in not_converged if i in required]
+    use = [(e, r) for e, r in zip(phases, results) if str(e.entry_id) not in dropped]
+    used_phases = [e for e, _ in use]
+    totals = [float(r.energy_ev) for _, r in use]             # raw MLIP totals, eV, for each cell
+    mlip_entries = [corrected_entry(e, total) for e, total in zip(used_phases, totals)]
+    steps_used = max((r.steps or 0 for r in results), default=0)
+    worst_phase = max(abs(d.mlip_minus_mp_ev_per_atom) for d in phase_differences(used_phases, totals))
 
     mlip_r = mp.reaction_energy(a, b, mlip_entries)
-    mp_r = mp.reaction_energy(a, b, phases)
+    mp_r = mp.reaction_energy(a, b, used_phases)
     result: Result = {
         **_reaction_result(mlip_r),
         "dE_mp_ev_per_atom": mp_r.dE_ev_per_atom,
@@ -214,12 +238,16 @@ def _mlip(tier: ComputeTier, inputs: dict[str, Any], settings: dict[str, Any], c
         "mp_products": mp_r.products,
         "model": str(settings["model"]),
         "n_structures": len(phases),
+        "n_elements_single_point": sum(is_element),
     }
     if relax:
         result["max_steps_used"] = steps_used
         result["n_not_converged"] = len(not_converged)
-        if not_converged:
-            result["not_converged_ids"] = ", ".join(not_converged)
+        result["n_competitors_dropped"] = len(dropped)
+        if dropped:
+            result["competitors_dropped_ids"] = ", ".join(dropped)
+        if blocking:
+            result["not_converged_ids"] = ", ".join(blocking)
             return BackendResult(ComputeStatus.not_converged, result)
     return BackendResult(ComputeStatus.ok, result)
 

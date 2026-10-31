@@ -119,8 +119,51 @@ def test_relaxation_with_converged_forces_but_high_stress_is_not_converged(cache
     out = run_tier(ComputeTier.bounded_relaxation, PAIR, RELAX, cache_dir=cache_dir,
                    calculator_factory=factory(FakeMLIP(stress=0.01)))
     assert out.status == ComputeStatus.not_converged
-    assert out.result["n_not_converged"] == out.result["n_structures"]
+    # elemental references get a single point, so every relaxed structure fails the stress test
+    assert out.result["n_not_converged"] == out.result["n_structures"] - out.result["n_elements_single_point"]
+    assert out.result["n_elements_single_point"] == 3                # Ca, Ti, O2
     assert out.result["max_steps_used"] == RELAX["max_steps"]
+
+
+class OneStuckMLIP(FakeMLIP):
+    """Converges everything except one phase, whose stress never drops. `stuck` is a reduced formula
+    (every cell with it) or a Structure (only that exact cell: same formula, atoms and volume)."""
+
+    def __init__(self, stuck) -> None:
+        super().__init__()
+        self.stuck = stuck
+
+    def _is_stuck(self) -> bool:
+        formula = Composition(self.atoms.get_chemical_formula(mode="metal")).reduced_formula
+        if isinstance(self.stuck, str):
+            return formula == self.stuck
+        return formula == self.stuck.composition.reduced_formula and len(self.atoms) == len(self.stuck)
+
+    def calculate(self, atoms=None, properties=("energy",), system_changes=all_changes) -> None:
+        super().calculate(atoms, properties, system_changes)
+        if self._is_stuck():
+            self.results["stress"] = np.full(6, 0.01)
+
+
+def test_stuck_competitor_is_dropped_and_listed_not_a_failed_request(cache_dir: Path) -> None:
+    from kiln.compute.tiers import _phase_selection
+    phases, required, elements = _phase_selection("CaO", "TiO2", RELAX, cache_dir)
+    key = lambda e: (e.composition.reduced_formula, len(e.structure))
+    competitors = [e for e in phases if str(e.entry_id) not in required | elements
+                   and sum(key(p) == key(e) for p in phases) == 1]     # only this cell has that formula and size
+    if not competitors:
+        pytest.skip("fixture has no uniquely identifiable near-hull competitor on the CaO-TiO2 line")
+    out = run_tier(ComputeTier.bounded_relaxation, PAIR, RELAX, cache_dir=cache_dir,
+                   calculator_factory=factory(OneStuckMLIP(competitors[0].structure)))
+    assert out.status == ComputeStatus.ok
+    assert out.result["n_competitors_dropped"] >= 1 and "competitors_dropped_ids" in out.result
+
+
+def test_stuck_required_phase_makes_the_request_not_converged(cache_dir: Path) -> None:
+    out = run_tier(ComputeTier.bounded_relaxation, PAIR, RELAX, cache_dir=cache_dir,
+                   calculator_factory=factory(OneStuckMLIP("CaTiO3")))          # the product
+    assert out.status == ComputeStatus.not_converged
+    assert "not_converged_ids" in out.result
 
 
 def test_structure_limits_fail_honestly(cache_dir: Path) -> None:
