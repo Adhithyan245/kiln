@@ -117,7 +117,7 @@ class Fabricator(Agent):
 def test_unverified_numbers_are_rejected_logged_and_not_scored(tmp_path: Path) -> None:
     base = stub_components()
     components = Components(compute=base.compute, specialists=lambda compute, c: [Fabricator()],
-                            tool_values=base.tool_values, flags=base.flags, scorer=base.scorer, stubs=True)
+                            tool_values=base.tool_values, flags=base.flags, scorer=base.scorer, stub_parts=base.stub_parts)
     run_dir = go(tmp_path, "C4", items=ITEMS[:1], components=components)
     assert jsonl(run_dir / "verifier.log")[0]["status"] in ("rejected", "inconclusive")
     assert jsonl(run_dir / "predictions.jsonl")[0]["evidence"] == []
@@ -132,6 +132,44 @@ def test_cli_runs_one_seed_of_every_condition_and_requires_a_model(tmp_path: Pat
                                                                       ["C1", "C2", "C3", "C4"]]
     with pytest.raises(SystemExit):
         main(["--split", "dev", "--all-conditions", "--seed", "0", "--stubs"])
-    with pytest.raises(SystemExit, match="real components"):
+    with pytest.raises(SystemExit, match="need --frozen"):
         main(["--split", "dev", "--condition", "C1", "--seed", "0", "--model", "offline",
               "--items-file", str(items_file)])
+    with pytest.raises(SystemExit, match="not found"):
+        main(["--split", "dev", "--condition", "C1", "--seed", "0", "--model", "offline",
+              "--items-file", str(items_file), "--frozen", str(tmp_path / "missing.json")])
+    partial = tmp_path / "partial.json"
+    partial.write_text(json.dumps({"tier_prices": stubs.STUB_TIER_PRICES}))
+    with pytest.raises(SystemExit, match="missing"):
+        main(["--split", "dev", "--condition", "C1", "--seed", "0", "--model", "offline",
+              "--items-file", str(items_file), "--frozen", str(partial)])
+
+
+class Crasher(Agent):
+    name = "thermo"
+
+    def step(self, item, board, budget) -> None:
+        if item.item_id != "T-1":
+            raise RuntimeError("provider down")
+
+
+def test_a_failing_item_is_logged_and_the_run_continues_then_stops_on_a_streak(tmp_path: Path) -> None:
+    base = stub_components()
+    one_bad = Components(compute=base.compute, specialists=lambda compute, c: [Crasher()], tool_values=base.tool_values,
+                         flags=base.flags, scorer=base.scorer, stub_parts=base.stub_parts)
+    run_dir = go(tmp_path, "C4", items=ITEMS[:2], components=one_bad)   # T-0 fails, T-1 predicts
+    assert [f["item_id"] for f in jsonl(run_dir / "failed_items.jsonl")] == ["T-0"]
+    assert [p["item_id"] for p in jsonl(run_dir / "predictions.jsonl")] == ["T-1"]
+    many = [ITEMS[0].model_copy(update={"item_id": f"T-0{n}"}) for n in range(5)]
+    with pytest.raises(SystemExit, match="in a row"):
+        go(tmp_path / "streak", "C4", items=many, components=one_bad)
+
+
+def test_real_components_wire_annamayyas_agents_with_the_frozen_thresholds() -> None:
+    from kiln.runners.conditions import real_components
+
+    comp = real_components({"energy_margin_ev_per_atom": 0.05, "disagreement_threshold_ev_per_atom": 0.05})
+    assert comp.stub_parts == ("scorer",)
+    agents = comp.specialists(object(), cfg("C4"))
+    assert sorted(a.name for a in agents) == ["kinetics", "precursor", "thermo"]
+    assert all(getattr(a, "energy_margin", 0.05) == 0.05 for a in agents)

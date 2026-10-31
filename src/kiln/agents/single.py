@@ -22,8 +22,8 @@ SYSTEM = ("You decide what evidence to gather about whether two solid precursors
 
 def describe(item: Item, board: Board, pending: Sequence[str] = ()) -> str:
     """What the LLM may see: the item and the accepted evidence so far. Never labels."""
-    lines = [f"Precursors {item.precursor_a} + {item.precursor_b} at {item.temperature_c} °C"
-             + (f" for {item.dwell_h} h" if item.dwell_h is not None else "") + "."]
+    # Dwell time is left out until its unit in the ledger is confirmed (dwell_h may not be hours).
+    lines = [f"Precursors {item.precursor_a} + {item.precursor_b} at {item.temperature_c} °C."]
     for a in board.accepted_artifacts(item.item_id):
         causes = ", ".join(c.cause for c in a.claims) or "no claim"
         lines.append(f"- accepted {a.type} from {a.agent}: {causes}")

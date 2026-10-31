@@ -55,6 +55,7 @@ class Step(BaseModel):
     on_missing_env: Literal["fail", "skip"] = "fail"
     requires_receipt: bool = False
     always: bool = False                      # runs at the end even after failure or stop
+    on_fail: Literal["continue", "stop"] = "continue"   # "stop": a failure alerts and stops the night cleanly
     note: str = ""
 
     def spec_hash(self) -> str:

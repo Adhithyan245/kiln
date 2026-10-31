@@ -66,7 +66,30 @@ def calls(repo: Path) -> list[str]:
 def test_bundled_plans_parse(name: str) -> None:
     plan = load_plan(PLANS / name)
     assert plan.order()
-    assert not plan.caps.complete()  # caps are OPEN-02: never defaulted
+    assert plan.caps.complete() == (name == "night2.toml")   # night2 caps set from the dry run; never defaulted
+
+
+def test_night2_pushes_before_the_label_steps_and_stops_there() -> None:
+    plan = load_plan(PLANS / "night2.toml")
+    order = [s.name for s in plan.order()]
+    assert order.index("push") < order.index("fetch_labels")
+    assert plan.step("fetch_labels").on_fail == plan.step("score").on_fail == "stop"
+    cmd = plan.step("run_conditions").cmd
+    assert "--items-file" in cmd and "--frozen" in cmd and "--allow-no-remote" in plan.step("push").cmd
+
+
+def test_on_fail_stop_alerts_and_stops_the_night(tmp_path: Path) -> None:
+    plan = make_plan([{"name": "a", "cmd": touch("a")},
+                      {"name": "b", "cmd": py("raise SystemExit(3)"), "depends_on": ["a"], "retries": 0,
+                       "on_fail": "stop"},
+                      {"name": "c", "cmd": touch("c"), "depends_on": ["a"]},
+                      {"name": "z", "cmd": touch("z"), "always": True}])
+    poster = Recorder()
+    runner, repo = make_runner(tmp_path, plan, poster)
+    report = runner.run(install_signals=False)
+    assert calls(repo) == ["a", "z"]                    # c never ran; the always-step still did
+    assert report.status["b"] == "failed" and report.status["c"] == "not_run"
+    assert any("on_fail=stop" in m for m in poster.messages)
 
 
 def test_night2_order_and_gates() -> None:

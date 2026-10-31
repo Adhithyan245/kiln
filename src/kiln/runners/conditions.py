@@ -32,7 +32,8 @@ import re
 import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -49,6 +50,7 @@ __all__ = ["CONDITIONS", "Components", "VerifyingBoard", "main", "run", "run_id_
 CONDITIONS = ("C1", "C2", "C3", "C4")
 SEEDS = (0, 1, 2)
 AGENT_ORDER = ("precursor", "thermo", "kinetics")   # fixed by the protocol, never shuffled by seed
+MAX_FAILURES_IN_A_ROW = 3
 
 
 class Compute(Protocol):
@@ -63,13 +65,21 @@ class Scorer(Protocol):
 
 @dataclass(frozen=True)
 class Components:
-    """The pieces each condition shares. `stubs` is recorded in config.json and in every prediction."""
+    """The pieces each condition shares. `stub_parts` names any stand-in in use; it is recorded in
+    config.json and in every prediction, so a stand-in result can never pass as an experiment result."""
     compute: Callable[[Path, RunConfig], Compute]
     specialists: Callable[[Compute, RunConfig], list[Agent]]
     tool_values: Callable[[Item], Mapping[str, float | str | bool | None]]
     flags: Callable[[Item, Sequence[Artifact], Sequence[ComputeRequest]], list[ReviewFlag]]
     scorer: Callable[[RunConfig], Scorer]
-    stubs: bool
+    stubs: bool = False
+    stub_parts: tuple[str, ...] = ()
+    agent_settings: Mapping[str, float | None] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:  # either field marks stand-ins; they always agree
+        if self.stubs and not self.stub_parts:
+            object.__setattr__(self, "stub_parts", ("unspecified",))
+        object.__setattr__(self, "stubs", bool(self.stub_parts))
 
 
 def stub_components() -> Components:
@@ -82,17 +92,43 @@ def stub_components() -> Components:
         tool_values=stubs.stub_tool_values,
         flags=stubs.stub_flags,
         scorer=stubs.StubScorer,
-        stubs=True,
+        stub_parts=("compute", "specialists", "tools", "flags", "scorer"),
     )
 
 
-def real_components() -> Components:
-    missing = [m for m in ("kiln.agents.thermo", "kiln.agents.kinetics", "kiln.agents.precursor",
-                           "kiln.tools.tammann", "kiln.review") if not _importable(m)]
-    if missing:
-        raise SystemExit(f"real components not on this branch yet: {', '.join(missing)}. "
-                         "Use --stubs for a dry run; stub results are never experiment results.")
-    raise SystemExit("real components are importable but not wired into the runner yet")  # CJ: wire on arrival
+AGENT_SETTINGS = ("energy_margin_ev_per_atom", "disagreement_threshold_ev_per_atom")
+
+
+def real_components(agent_settings: Mapping[str, float | None]) -> Components:
+    """Annamayya's specialists, tools and flags, and the real compute client. The scorer stays the
+    stand-in until the protocol freezes the scoring rules (OPEN-05), and says so."""
+    from functools import partial
+
+    from kiln.agents.kinetics import Kinetics
+    from kiln.agents.precursor import Precursor
+    from kiln.agents.thermo import Thermo
+    from kiln.compute.backends import backend_from_env
+    from kiln.compute.cache import ResultCache
+    from kiln.compute.client import ComputeClient
+    from kiln.compute.profile import load_tier_settings
+    from kiln.review import flags
+    from kiln.runners.stubs import StubScorer
+    from kiln.tools.tammann import item_tool_values
+
+    margin = agent_settings.get("energy_margin_ev_per_atom")
+    disagree = agent_settings.get("disagreement_threshold_ev_per_atom")
+    return Components(
+        compute=lambda run_dir, cfg: ComputeClient(run_dir, cfg, backend_from_env(), ResultCache(Path("cache") / "compute"),
+                                                   load_tier_settings()),
+        specialists=lambda compute, cfg: [Precursor(compute), Thermo(compute, energy_margin_ev_per_atom=margin,
+                                                                     disagreement_threshold_ev_per_atom=disagree),
+                                          Kinetics(energy_margin_ev_per_atom=margin)],
+        tool_values=item_tool_values,
+        flags=partial(flags, disagreement_threshold=disagree),
+        scorer=StubScorer,
+        stub_parts=("scorer",),
+        agent_settings={"energy_margin_ev_per_atom": margin, "disagreement_threshold_ev_per_atom": disagree},
+    )
 
 
 def run_id_for(condition: str, model: str, seed: int, split: str) -> str:
@@ -208,8 +244,8 @@ def run_item(cfg: RunConfig, run_dir: Path, item: Item, compute: Compute, compon
     cost = budget.spent.model_copy(update={"gpu_seconds": sum(r.gpu_seconds for r in reqs)})
     prediction = components.scorer(cfg).score(item, accepted, reqs, flags, cost=cost)
     if components.stubs:
-        prediction = prediction.model_copy(update={
-            "applicability_notes": [*prediction.applicability_notes, "STUB components: not an experiment result."]})
+        prediction = prediction.model_copy(update={"applicability_notes": [
+            *prediction.applicability_notes, f"STUB components ({', '.join(components.stub_parts)}): not an experiment result."]})
     return prediction
 
 
@@ -225,24 +261,41 @@ def run(cfg: RunConfig, items: Sequence[Item], components: Components, runs_dir:
     costs: dict[str, Any] = json.loads(cost_path.read_text(encoding="utf-8")) if cost_path.exists() else {}
     compute = components.compute(run_dir, cfg)
     todo = [i for i in sorted(items, key=lambda i: i.item_id) if i.item_id not in done]
+    in_a_row = 0
     for n, item in enumerate(todo, 1):
-        prediction = run_item(cfg, run_dir, item, compute, components)
+        start = time.monotonic()
+        try:
+            prediction = run_item(cfg, run_dir, item, compute, components)
+        except Exception as exc:  # OPEN-23: logged, never dropped; a rerun retries the item
+            in_a_row += 1
+            _append_jsonl(run_dir / "failed_items.jsonl", {"item_id": item.item_id, "error": f"{type(exc).__name__}: {exc}"[:500],
+                                                            "wall_s": round(time.monotonic() - start, 3)})
+            progress(f"[{n}/{len(todo)}] {cfg.run_id} {item.item_id}: FAILED {type(exc).__name__}: {exc}")
+            if in_a_row >= MAX_FAILURES_IN_A_ROW:   # systemic (no key, service down): stop, don't burn the list
+                raise SystemExit(f"{in_a_row} items failed in a row; stopping {cfg.run_id} (see failed_items.jsonl)")
+            continue
+        in_a_row = 0
+        wall = round(time.monotonic() - start, 3)
         _append_jsonl(pred_path, prediction.model_dump(mode="json"))
+        _append_jsonl(run_dir / "timings.jsonl", {"item_id": item.item_id, "wall_s": wall,
+                                                   "tokens": prediction.cost.tokens_in + prediction.cost.tokens_out})
         costs[item.item_id] = prediction.cost.model_dump()
         _atomic_write(cost_path, json.dumps(costs, indent=1))
         progress(f"[{n}/{len(todo)}] {cfg.run_id} {item.item_id}: p={prediction.p_react} {prediction.category.value} "
-                 f"flags={len(prediction.review_flags)} units={prediction.cost.compute_units}")
+                 f"flags={len(prediction.review_flags)} units={prediction.cost.compute_units} wall={wall}s")
     return run_dir
 
 
 def _write_config(run_dir: Path, cfg: RunConfig, components: Components, n_items: int) -> None:
-    record = {"run_config": cfg.model_dump(), "stubs_used": components.stubs, "git_sha": _git_sha(),
+    record = {"run_config": cfg.model_dump(), "stubs_used": components.stubs,
+              "stub_parts": list(components.stub_parts), "agent_settings": dict(components.agent_settings),
+              "git_sha": _git_sha(),
               "llm_prices_usd_per_mtok": {k: list(v) for k, v in PRICES_USD_PER_MTOK.items()},
               "agent_order": list(AGENT_ORDER), "n_items": n_items}
     path = run_dir / "config.json"
     if path.exists():  # resuming: the run's settings must not change underneath it
         old = json.loads(path.read_text(encoding="utf-8"))
-        if old["run_config"] != record["run_config"] or old["stubs_used"] != record["stubs_used"]:
+        if any(old.get(k) != record[k] for k in ("run_config", "stubs_used", "stub_parts", "agent_settings")):
             raise SystemExit(f"{path} has different settings; use a new run id instead of resuming")
         return
     _atomic_write(path, json.dumps(record, indent=2))
@@ -273,14 +326,6 @@ def _safe(item_id: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", item_id)
 
 
-def _importable(module: str) -> bool:
-    import importlib.util
-
-    try:
-        return importlib.util.find_spec(module) is not None
-    except ModuleNotFoundError:
-        return False
-
 
 def _git_sha() -> str:
     try:
@@ -288,6 +333,19 @@ def _git_sha() -> str:
                               check=True).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return "unknown"
+
+
+CAP_KEYS = ("max_tool_calls_per_item", "max_tokens_per_item", "max_compute_units_per_item")
+
+
+def _read_frozen(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        raise SystemExit(f"{path} not found: it is written at the freeze; refusing to run with unfrozen settings")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    missing = [k for k in ("tier_prices", *CAP_KEYS, *AGENT_SETTINGS) if k not in data]
+    if missing:  # every key must be present; null is allowed for a threshold the protocol leaves unset
+        raise SystemExit(f"{path} is missing {missing}")
+    return data
 
 
 def _load_items(split: str, items_file: Path | None) -> list[Item]:
@@ -306,9 +364,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", required=True, help="exact model id, recorded in every run; no default")
     parser.add_argument("--items-file", type=Path, help="agent-visible items (JSON Lines) instead of the ledger")
     parser.add_argument("--limit", type=int, help="first N items in sorted order (dry runs)")
-    parser.add_argument("--tier-prices", type=Path, help="JSON with a tier_prices mapping (the frozen price list)")
-    parser.add_argument("--budget", type=Path, help="JSON with max_tool_calls_per_item, max_tokens_per_item, "
-                                                    "max_compute_units_per_item (the frozen caps)")
+    parser.add_argument("--frozen", type=Path,
+                        help="the frozen settings JSON: tier_prices, max_tool_calls_per_item, max_tokens_per_item, "
+                             "max_compute_units_per_item, energy_margin_ev_per_atom, "
+                             "disagreement_threshold_ev_per_atom (required without --stubs)")
     parser.add_argument("--stubs", action="store_true", help="use the stand-ins; results are marked and never "
                                                              "experiment results")
     parser.add_argument("--runs-dir", type=Path, default=Path("runs"))
@@ -316,14 +375,16 @@ def main(argv: list[str] | None = None) -> int:
 
     conditions = list(CONDITIONS) if args.all_conditions else (args.condition or parser.error("give --condition or --all-conditions"))
     seeds = list(SEEDS) if args.all_seeds else (args.seed or parser.error("give --seed or --all-seeds"))
-    components = stub_components() if args.stubs else real_components()
+    frozen = _read_frozen(args.frozen) if args.frozen else None
+    if args.stubs:
+        components = stub_components()
+    elif frozen is None:
+        raise SystemExit("real runs need --frozen (prices, caps and thresholds from the freeze)")
+    else:
+        components = real_components({k: frozen.get(k) for k in AGENT_SETTINGS})
     items = _load_items(args.split, args.items_file)
     items = sorted(items, key=lambda i: i.item_id)[: args.limit] if args.limit else items
-    extra: dict[str, Any] = {}
-    if args.tier_prices:
-        extra["tier_prices"] = json.loads(args.tier_prices.read_text(encoding="utf-8"))["tier_prices"]
-    if args.budget:
-        extra.update(json.loads(args.budget.read_text(encoding="utf-8")))
+    extra: dict[str, Any] = {k: frozen[k] for k in ("tier_prices", *CAP_KEYS) if frozen and k in frozen}
     # One seed of every condition first, so a partial night is still a valid comparison (plan R2).
     for seed in seeds:
         for condition in conditions:

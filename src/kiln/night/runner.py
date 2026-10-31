@@ -181,6 +181,8 @@ class NightRunner:
                 self.alerter.send(f"{step.name}: attempt {attempt}/{tries} failed ({why}); retrying in {delay:.0f}s")
                 self.sleep(delay)
         self.alerter.send(f"{step.name}: FAILED after {tries} attempts ({why})")
+        if step.on_fail == "stop" and honour_stop:
+            self.request_stop(f"{step.name} failed and is marked on_fail=stop")
         return "failed"
 
     def _spawn(self, step: Step, honour_stop: bool) -> tuple[int, str]:

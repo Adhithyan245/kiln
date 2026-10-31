@@ -50,6 +50,22 @@ def test_ok_request_is_charged_logged_and_cached(paths) -> None:
     assert [r["request_id"] for r in read_log(run_dir)] == [req.request_id]
 
 
+def test_a_change_to_the_tier_code_invalidates_the_cache(paths) -> None:
+    run_dir, cache_dir = paths
+    client, budget = make_client(run_dir, cache_dir), Budget(make_config())
+    first = ask(client, budget)
+    assert ask(client, budget).status == ComputeStatus.cached
+    client.code_version = "tiers-fixed-tonight"            # as if tiers.py had changed
+    again = ask(client, budget)
+    assert again.status == ComputeStatus.ok and again.cache_key != first.cache_key
+    assert "_code_version" not in again.settings           # the backend sees the settings unchanged
+
+
+def test_code_version_follows_the_tier_source() -> None:
+    assert client_module.code_version() == client_module.code_version()
+    assert len(client_module.code_version()) == 16
+
+
 def test_cache_hit_is_charged_full_price(paths) -> None:
     run_dir, cache_dir = paths
     backend = StubBackend()

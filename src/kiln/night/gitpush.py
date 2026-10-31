@@ -18,7 +18,7 @@ def _git(*args: str) -> str:
     return subprocess.run(["git", *args], capture_output=True, text=True, check=True).stdout.strip()
 
 
-def push(paths: list[str], message: str) -> str:
+def push(paths: list[str], message: str, *, allow_no_remote: bool = False) -> str:
     branch = _git("rev-parse", "--abbrev-ref", "HEAD")
     if branch == "HEAD" or branch in _PROTECTED:
         raise SystemExit(f"refusing to push from {branch!r}")
@@ -28,8 +28,15 @@ def push(paths: list[str], message: str) -> str:
         _git("add", "--", *paths)
         if _git("diff", "--cached", "--name-only"):
             _git("commit", "-m", message)
-    _git("pull", "--rebase", "--autostash", "origin", branch)  # step logs are still being written
-    _git("push", "origin", f"HEAD:refs/heads/{branch}")
+    try:
+        _git("pull", "--rebase", "--autostash", "origin", branch)  # step logs are still being written
+        _git("push", "origin", f"HEAD:refs/heads/{branch}")
+    except subprocess.CalledProcessError as exc:
+        if not allow_no_remote:
+            raise
+        # Committed locally; the push is skipped, not hidden: the note names the commit to bring back.
+        print(f"push skipped (no reachable remote: {(exc.stderr or '').strip()[:200]}); "
+              f"committed locally at {_git('rev-parse', '--short', 'HEAD')} on {branch}", file=sys.stderr)
     return branch
 
 
@@ -37,8 +44,10 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="python -m kiln.night.gitpush")
     p.add_argument("--paths", nargs="*", default=[])
     p.add_argument("--message", default="night: results")
+    p.add_argument("--allow-no-remote", action="store_true",
+                   help="commit locally and skip the push with a note when the remote is unreachable (GB10)")
     args = p.parse_args(argv)
-    print(push(args.paths, args.message))
+    print(push(args.paths, args.message, allow_no_remote=args.allow_no_remote))
     return 0
 
 

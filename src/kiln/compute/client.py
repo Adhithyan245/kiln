@@ -34,6 +34,23 @@ RELAXATION_SETTINGS = frozenset({"fmax_ev_per_a", "stress_tol_ev_per_a3", "max_s
 
 _BACKEND_STATUSES = frozenset({ComputeStatus.ok, ComputeStatus.not_converged, ComputeStatus.failed})
 
+# The physics code a cached result depends on. Its hash goes into every cache key, so a result
+# computed by older tier code is never served after that code changes (the settings alone don't
+# capture a code fix). The backend still receives the settings unchanged.
+_TIER_CODE = ("compute/tiers.py", "compute/convergence.py", "compute/energy_reference.py",
+              "compute/decomposition.py", "tools/mp.py")
+
+
+def code_version() -> str:
+    import hashlib
+
+    root = Path(__file__).resolve().parents[1]
+    digest = hashlib.sha256()
+    for rel in _TIER_CODE:
+        path = root / rel
+        digest.update(rel.encode() + b"\0" + (path.read_bytes() if path.exists() else b"missing") + b"\0")
+    return digest.hexdigest()[:16]
+
 
 class ComputeClient:
     def __init__(
@@ -56,6 +73,7 @@ class ComputeClient:
         self.backend = backend
         self.cache = cache
         self.tier_settings = {tier: dict(s) for tier, s in tier_settings.items()}
+        self.code_version = code_version()
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.log_path = self.run_dir / "compute_requests.jsonl"
         self._lock = FileLock(str(self.run_dir / ".compute_requests.lock"))
@@ -74,7 +92,7 @@ class ComputeClient:
         if tier not in self.tier_settings:
             raise ValueError(f"no settings configured for tier {tier.value!r}")
         settings = dict(self.tier_settings[tier])
-        key = cache_key(tier, inputs, settings)   # raises on non-JSON inputs, before any charge
+        key = cache_key(tier, inputs, {**settings, "_code_version": self.code_version})  # raises on non-JSON inputs
         units = price(self.config, tier)
 
         budget.charge_compute(units)
