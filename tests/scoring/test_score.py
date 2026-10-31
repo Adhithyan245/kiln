@@ -419,6 +419,45 @@ def test_invalid_request_charges_are_rejected(item, evidence):
         engine_for(synthetic_rules()).score(item, evidence, requests, [], cost=Cost(compute_units=0.5, gpu_seconds=4.0))
 
 
+def test_item_cost_above_the_complete_log_is_refused(item, evidence):
+    # The integration case: the verifier accepts this while the item is in
+    # progress, but at scoring time one compute unit has no logged request.
+    requests = [make_request(1, units=1.0, gpu=0.0),
+                make_request(2, units=3.0, gpu=12.5, status=ComputeStatus.not_converged)]
+    engine = engine_for(synthetic_rules())
+    with pytest.raises(ValueError, match=r"cost.compute_units is 5.0 but the item's compute requests total 4.0"):
+        engine.score(item, evidence, requests, [], cost=Cost(compute_units=5.0, gpu_seconds=12.5))
+    with pytest.raises(ValueError, match=r"cost.compute_units is 3.0 .* total 4.0"):
+        engine.score(item, evidence, requests, [], cost=Cost(compute_units=3.0, gpu_seconds=12.5))
+
+
+def test_shared_citations_cached_and_failed_charges_count_once(item):
+    # An escalated artifact cites the cached request and the refined one, as
+    # the verifier allows; an earlier artifact cites the cached one.
+    cached = make_request(1, units=1.0, gpu=0.0, status=ComputeStatus.cached)
+    refined = make_request(2, units=3.0, gpu=12.5, status=ComputeStatus.not_converged)
+    evidence = [
+        make_artifact(1, values={"dE_ev_per_atom": 0.1}, compute_requests=[cached.request_id],
+                      cost=Cost(compute_units=1.0)),
+        make_artifact(2, values={"dE_ev_per_atom": 0.1}, compute_requests=[cached.request_id, refined.request_id],
+                      cost=Cost(compute_units=4.0)),
+        make_artifact(1, agent="kinetics", kind="kinetics_report", values={"tammann_a_c": 2.0}),
+    ]
+    requests = [cached, refined]
+    # Tool calls, tokens and USD are not in the compute log; they pass through.
+    cost = Cost(compute_units=4.0, gpu_seconds=12.5, tool_calls=6, tokens_in=1200, tokens_out=300, usd=0.02)
+    engine = engine_for(synthetic_rules())
+    prediction = engine.score(item, evidence, requests, [], cost=cost)
+    assert prediction.cost == cost
+    assert prediction.compute_requests == ["run:compute:1", "run:compute:2"]
+    # Summing artifact costs (1 + 4) counts the shared cached request twice.
+    with pytest.raises(ValueError, match="total 4.0"):
+        engine.score(item, evidence, requests, [], cost=cost.model_copy(update={"compute_units": 5.0}))
+    # A cache hit is still charged, so leaving it out of the cost is refused.
+    with pytest.raises(ValueError, match="total 4.0"):
+        engine.score(item, evidence, requests, [], cost=cost.model_copy(update={"compute_units": 3.0}))
+
+
 def test_scoring_is_deterministic_and_detached_from_caller_config(item, evidence):
     config = RunConfig(run_id="run", condition="C1", seed=3, model="synthetic-model")
     engine = engine_for(synthetic_rules(), config)

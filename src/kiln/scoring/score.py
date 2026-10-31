@@ -273,8 +273,15 @@ class ScoringEngine:
         """Prediction for one item.
 
         ``requests`` must be the item's full compute log for this run, and
-        ``cost`` its cumulative cost: ``cost.compute_units`` and
-        ``cost.gpu_seconds`` must equal the sums over ``requests``. Every flag
+        ``cost`` its final cumulative cost: ``cost.compute_units`` and
+        ``cost.gpu_seconds`` must equal the sums over ``requests``. Every
+        request, cached or failed included, is charged at its tier price and
+        logged (AGENTS.md rule 8), so compute units with no logged request are
+        refused rather than accepted as unexplained. The verifier only checks
+        that the log does not exceed the item cost, because it runs while the
+        item is still in progress. Artifact costs are not summed: several
+        artifacts may cite the same request. Tool calls, tokens and USD are
+        not in the compute log and are taken from ``cost`` as given. Every flag
         is kept. Scoring adds a missing-evidence flag for each feature that
         used its fallback, and a failed-computation flag for each failed or
         non-converged request that no failed-computation flag cites.
@@ -332,5 +339,7 @@ def _check_cost(cost: Cost, requests: tuple[ComputeRequest, ...]) -> None:
         parts = [getattr(request, name) for request in requests]
         if any(not math.isfinite(part) or part < 0 for part in parts):
             raise ValueError(f"invalid compute request {name}")
-        if not _close(getattr(cost, name), math.fsum(parts)):
-            raise ValueError(f"cost.{name} does not equal the sum over the item's compute requests")
+        total = math.fsum(parts)
+        if not _close(getattr(cost, name), total):
+            raise ValueError(f"cost.{name} is {getattr(cost, name)!r} but the item's compute requests total "
+                             f"{total!r}; requests must be the complete compute log and every charge logged")
