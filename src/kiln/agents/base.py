@@ -19,6 +19,7 @@ import json
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Any
 
 from kiln.board import Board
 from kiln.budget import Budget
@@ -26,13 +27,15 @@ from kiln.schemas import AgentName, Item, RunConfig
 
 __all__ = ["Agent", "LLMResponse", "LLMUnavailable", "PRICES_USD_PER_MTOK", "llm_call", "llm_choose", "provider_for"]
 
-# Dollar prices per million tokens, (input, output), keyed by exact model id.
-# Fill these in from each provider's price page before the main run; a model with no
-# entry is logged with usd = 0 and a warning in LLMResponse.notes.
+# Dollar prices per million tokens, (input, output), keyed by exact model id. Output includes
+# thinking tokens. A model with no entry is logged with usd = 0 and a warning in LLMResponse.notes.
+# Gemini: ai.google.dev/gemini-api/docs/pricing, paid tier, standard (not Batch), read 2026-10-31;
+# gemini-3.8-flash doubles on 2027-01-01. Add the Claude and OpenAI models once the secondary-run
+# models are chosen.
 PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {
-    # "gemini-...": (input, output),
-    # "claude-...": (input, output),
-    # "gpt-...":    (input, output),
+    "gemini-3.8-flash": (0.75, 3.75),
+    "gemini-3.1-flash-lite": (0.25, 1.50),
+    "gemini-3-flash-preview": (0.50, 3.00),
 }
 
 MAX_OUTPUT_TOKENS = 1024
@@ -119,8 +122,20 @@ def _key(*names: str) -> str:
     raise LLMUnavailable(f"set {' or '.join(names)} in the environment")
 
 
+_GEMINI_CLIENTS: dict[str, Any] = {}
+
+
+def _gemini_client(api_key: str) -> Any:
+    """One client per key, kept alive for the run: a client that goes out of scope closes its
+    connection before the request is sent."""
+    if api_key not in _GEMINI_CLIENTS:
+        from google import genai
+
+        _GEMINI_CLIENTS[api_key] = genai.Client(api_key=api_key)
+    return _GEMINI_CLIENTS[api_key]
+
+
 def _gemini(prompt: str, system: str, config: RunConfig) -> tuple[str, int, int]:
-    from google import genai
     from google.genai import types
 
     gen_config = types.GenerateContentConfig(
@@ -132,10 +147,12 @@ def _gemini(prompt: str, system: str, config: RunConfig) -> tuple[str, int, int]
         if not os.environ.get(name):
             continue
         try:
-            r = genai.Client(api_key=os.environ[name]).models.generate_content(
-                model=config.model, contents=prompt, config=gen_config)
+            client = _gemini_client(os.environ[name])
+            r = client.models.generate_content(model=config.model, contents=prompt, config=gen_config)
             usage = r.usage_metadata
-            return r.text or "", usage.prompt_token_count or 0, usage.candidates_token_count or 0
+            # thinking tokens are billed as output and count against the token budget
+            out = (usage.candidates_token_count or 0) + (getattr(usage, "thoughts_token_count", None) or 0)
+            return r.text or "", usage.prompt_token_count or 0, out
         except Exception as exc:  # try the other account, then report both failures
             errors.append(f"{name}: {exc}")
     raise LLMUnavailable("Gemini call failed: " + ("; ".join(errors) or "set GEMINI_API_KEY or GEMINI_API_KEY_2"))

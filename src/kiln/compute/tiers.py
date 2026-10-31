@@ -247,12 +247,12 @@ def bounded_relaxation(structures: Structure | Sequence[Structure], settings: di
 def _run_structures(tier: ComputeTier, structures: Structure | Sequence[Structure],
                     settings: dict[str, Any], calculator_factory: CalculatorFactory | None) -> TierRun:
     backend = str(settings.get("backend", "ase"))
-    if backend != "ase":
-        # "nvalchemi" (NVIDIA ALCHEMI Toolkit batched FIRE2 with a variable cell) is built and checked
-        # against this ASE path on the GB10, from the kit's alchemi-mlip-test.py recipe.
-        raise NotImplementedError(f"backend {backend!r} is not available yet; use 'ase'")
     items = [structures] if isinstance(structures, Structure) else list(structures)
     device = str(settings.get("device", "cuda"))
+    if backend == "nvalchemi":
+        return _run_nvalchemi(tier, items, settings, device)
+    if backend != "ase":
+        raise NotImplementedError(f"unknown backend {backend!r}; use 'ase' or 'nvalchemi'")
     calc = (calculator_factory or mace_calculator)(settings)
     relax = tier == ComputeTier.bounded_relaxation
     results: list[StructureResult] = []
@@ -277,6 +277,93 @@ def _run_structures(tier: ComputeTier, structures: Structure | Sequence[Structur
     wall = time.perf_counter() - start
     gpu = wall if device.startswith("cuda") else 0.0
     return TierRun(tier, backend, dict(settings), results, round(wall, 3), round(gpu, 3))
+
+
+# ---------- NVIDIA ALCHEMI Toolkit backend ----------
+
+@lru_cache(maxsize=2)
+def _nvalchemi_model(model: str, device: str, dtype: str) -> Any:
+    import torch
+    from nvalchemi.models.mace import MACEWrapper  # GPU-host dependency, imported lazily
+
+    m = MACEWrapper.from_checkpoint(model, device=torch.device(device), dtype=getattr(torch, dtype),
+                                    enable_cueq=device.startswith("cuda"))
+    m.set_config("active_outputs", {"energy", "forces", "stress"})
+    return m
+
+
+def _run_nvalchemi(tier: ComputeTier, items: list[Structure], settings: dict[str, Any], device: str) -> TierRun:
+    """All structures in one GPU batch through the ALCHEMI Toolkit (FIRE2VariableCell for relaxations).
+
+    Convergence uses the same definition as the ASE path, not the kit's: max per-atom force norm
+    <= fmax_ev_per_a AND max |stress component| <= stress_tol_ev_per_a3 (the kit uses the stress
+    Frobenius norm). Each structure's status is then re-checked from its final forces and stress
+    with kiln.compute.convergence. The Toolkit counts steps for the whole batch, so a relaxed
+    structure's `steps` is the batch's step count (exact when the batch holds one structure).
+    """
+    import torch
+    from nvalchemi.data import AtomicData, Batch
+    from nvalchemi.dynamics import FIRE2VariableCell
+    from nvalchemi.dynamics.base import ConvergenceHook, DynamicsStage
+
+    relax = tier == ComputeTier.bounded_relaxation
+    dtype = str(settings.get("dtype", "float32"))
+    torch_dtype = getattr(torch, dtype)
+    model = _nvalchemi_model(str(settings["model"]), device, dtype)
+    data = []
+    for s in items:
+        n = len(s)
+        d = AtomicData.from_atoms(AseAtomsAdaptor.get_atoms(s), device="cpu", dtype=torch_dtype)
+        d.forces, d.energy = torch.zeros(n, 3, dtype=torch_dtype), torch.zeros(1, 1, dtype=torch_dtype)
+        d.velocities, d.stress = torch.zeros(n, 3, dtype=torch_dtype), torch.zeros(1, 3, 3, dtype=torch_dtype)
+        data.append(d)
+    fmax = float(settings.get("fmax_ev_per_a", 0.05))
+    s_tol = float(settings.get("stress_tol_ev_per_a3", 0.001))
+    hook = ConvergenceHook(criteria=[
+        {"key": "forces", "threshold": fmax, "reduce_op": "norm", "reduce_dims": -1},
+        {"key": "stress", "threshold": s_tol,
+         "custom_op": lambda s: s.reshape(s.shape[0], -1).abs().amax(dim=-1) <= s_tol},
+    ])
+    opt = FIRE2VariableCell(model=model, dt=float(settings.get("dt", 0.1)),
+                            n_steps=int(settings["max_steps"]) if relax else 0, convergence_hook=hook)
+    for h in model.make_neighbor_hooks():
+        opt.register_hook(h, stage=DynamicsStage.BEFORE_COMPUTE)
+    _sync(device)
+    start = time.perf_counter()
+    try:
+        batch = Batch.from_data_list(data, device=torch.device(device))
+        if relax:
+            batch = opt.run(batch)
+        else:
+            # A single point is one model evaluation, run the way the Toolkit runs it inside a step
+            # (neighbor list in the BEFORE_COMPUTE hooks), with no position or cell update.
+            # run(n_steps=0) evaluates nothing.
+            opt._call_hooks(DynamicsStage.BEFORE_COMPUTE, batch)
+            opt.compute(batch)
+            opt._call_hooks(DynamicsStage.AFTER_COMPUTE, batch)
+    except Exception as exc:  # the whole batch failed: every structure is a logged failure
+        _sync(device)
+        wall = time.perf_counter() - start
+        failed = [StructureResult(ComputeStatus.failed, len(s), error=f"{type(exc).__name__}: {exc}") for s in items]
+        return TierRun(tier, "nvalchemi", dict(settings), failed, round(wall, 3), round(wall if device.startswith("cuda") else 0.0, 3))
+    _sync(device)
+    wall = time.perf_counter() - start
+    energies = batch.energy.detach().double().reshape(-1).cpu().numpy()
+    forces = batch.forces.detach().double().cpu().numpy()
+    stress = batch.stress.detach().double().reshape(-1, 3, 3).cpu().numpy()
+    owner = batch.batch_idx.detach().cpu().numpy()
+    steps = int(getattr(opt, "step_count", 0)) if relax else None
+    results = []
+    for i, s in enumerate(items):
+        n = len(s)
+        f, st = forces[owner == i], stress[i]
+        status = ComputeStatus.ok
+        if relax:
+            status = ComputeStatus.ok if converged(f, st, fmax, s_tol) else ComputeStatus.not_converged
+        e = float(energies[i])
+        results.append(StructureResult(status, n, e, e / n, max_force(f), max_stress(st), steps))
+    return TierRun(tier, "nvalchemi", dict(settings), results, round(wall, 3),
+                   round(wall if device.startswith("cuda") else 0.0, 3))
 
 
 def run_tier(tier: ComputeTier, inputs: dict[str, Any], settings: dict[str, Any], *,
@@ -304,14 +391,16 @@ def structure_from_cache(formula: str, cache_dir: Path = mp.CACHE_DIR) -> Comput
     """
     target = Composition(formula).reduced_formula
     elements = set(mp.chemsys_for(formula).split("-"))
-    entries: list[ComputedStructureEntry] = []
-    for path in sorted(Path(cache_dir).glob("*.json")):
-        if elements <= set(path.stem.split("-")):
-            entries += [e for e in mp.load_entries(path.stem, cache_dir=cache_dir)
-                        if isinstance(e, ComputedStructureEntry) and e.composition.reduced_formula == target]
-    if not entries:
-        raise ValueError(f"no cached Materials Project structure for {target} in {cache_dir}")
-    return min(entries, key=lambda e: e.energy_per_atom)
+    # Smallest systems first (the formula's own system if cached); MP returns the same entries for a
+    # formula in every system that contains it, so the first file with a match is enough.
+    candidates = sorted((p for p in Path(cache_dir).glob("*.json") if elements <= set(p.stem.split("-"))),
+                        key=lambda p: (len(p.stem.split("-")), p.stem))
+    for path in candidates:
+        entries = [e for e in mp.load_entries(path.stem, cache_dir=cache_dir)
+                   if isinstance(e, ComputedStructureEntry) and e.composition.reduced_formula == target]
+        if entries:
+            return min(entries, key=lambda e: e.energy_per_atom)
+    raise ValueError(f"no cached Materials Project structure for {target} in {cache_dir}")
 
 
 def _sync(device: str) -> None:
