@@ -54,8 +54,11 @@ def verify(
     and b, ``decomposes_at_c``, ``volatile_above_c``); it must never be copied
     from the artifact under check.
 
-    Energy keys must equal the same key in at least one cited compute result,
-    so an escalated artifact may cite both the cached and the refined request.
+    Energy keys must equal the same key in at least one cited ``ok`` or
+    ``cached`` compute result, so an escalated artifact may cite both the
+    cached and the refined request. Cited ``failed`` or ``not_converged``
+    requests are allowed and still count towards cost, but their results
+    never support a value.
     Tool keys must equal ``tool_values``; compute results never establish them,
     and ``tool_values`` never establishes an energy. A value with no source
     is inconclusive.
@@ -109,8 +112,10 @@ def verify(
                 errors.append(f"Unknown compute request: {request_id}")
             else:
                 cited.append(request)
-                if request.status not in (ComputeStatus.ok, ComputeStatus.cached):
-                    errors.append(f"Unusable compute request: {request_id}")
+    # Failed and non-converged requests stay cited and charged, so an honest
+    # artifact is not punished for listing them; review flags surface them.
+    usable = [request for request in cited
+              if request.status in (ComputeStatus.ok, ComputeStatus.cached)]
 
     for key in artifact.values:
         if key in forbidden:
@@ -131,9 +136,9 @@ def verify(
                 elif tool_values[key] != value:
                     errors.append(f"Numeric value differs from tool value: {key}")
                 continue
-            sources = [request.result[key] for request in cited if key in request.result]
+            sources = [request.result[key] for request in usable if key in request.result]
             if not sources:
-                unknown.append(f"no compute result for numeric value: {key}")
+                unknown.append(f"no usable compute result for numeric value: {key}")
             elif not all(_number(source) for source in sources):
                 errors.append(f"Invalid compute result for numeric value: {key}")
             elif value not in sources:

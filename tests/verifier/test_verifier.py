@@ -161,6 +161,44 @@ def test_uncited_request_result_cannot_support_a_value():
     assert status == VerifierStatus.rejected
 
 
+@pytest.mark.parametrize("status", ["not_converged", "failed"])
+@pytest.mark.parametrize("result", [{"dE_ev_per_atom": -0.08}, {"dE_ev_per_atom": None}])
+def test_escalation_with_failed_refinement_keeps_cached_evidence(status, result):
+    requests = escalation()
+    requests[1] = requests[1].model_copy(update={"status": status, "result": result})
+    target = artifact(compute_requests=["request-1", "request-2"], claims=[claim()],
+                      cost=Cost(compute_units=7))
+    assert check(target, requests, Cost(compute_units=7)) == (VerifierStatus.accepted,
+                                                              "Checks passed")
+
+
+def test_value_from_failed_request_is_not_accepted():
+    requests = escalation()
+    requests[1] = requests[1].model_copy(update={"status": "not_converged"})
+    target = artifact(values={"dE_ev_per_atom": -0.08}, compute_requests=["request-1", "request-2"],
+                      cost=Cost(compute_units=7))
+    status, notes = check(target, requests, Cost(compute_units=7))
+    assert status == VerifierStatus.rejected
+    assert "differs from every cited compute result: dE_ev_per_atom" in notes
+
+
+def test_value_supported_only_by_failed_request_is_inconclusive():
+    failed = request(status="failed", result={"dE_ev_per_atom": -0.1})
+    target = artifact(compute_requests=["request-1"], cost=Cost(compute_units=2))
+    status, notes = check(target, [failed], Cost(compute_units=2))
+    assert status == VerifierStatus.inconclusive
+    assert "no usable compute result for numeric value: dE_ev_per_atom" in notes
+
+
+def test_failed_request_charge_counts_towards_artifact_cost():
+    requests = escalation()
+    requests[1] = requests[1].model_copy(update={"status": "not_converged"})
+    target = artifact(compute_requests=["request-1", "request-2"], cost=Cost(compute_units=2))
+    status, notes = check(target, requests, Cost(compute_units=7))
+    assert status == VerifierStatus.rejected
+    assert "Artifact compute cost disagrees" in notes
+
+
 @pytest.mark.parametrize("bad", [None, "-0.1", True, float("nan")])
 def test_invalid_cited_compute_result_is_rejected(bad):
     requests = [request(), request(request_id="request-2", result={"dE_ev_per_atom": bad})]
@@ -213,7 +251,7 @@ def test_compute_result_cannot_establish_tool_value():
 def test_tool_values_cannot_establish_energy():
     status, notes = check(artifact(), tool_values={"dE_ev_per_atom": -0.1})
     assert status == VerifierStatus.inconclusive
-    assert "no compute result for numeric value: dE_ev_per_atom" in notes
+    assert "no usable compute result for numeric value: dE_ev_per_atom" in notes
 
 
 def test_missing_context_remains_inconclusive():
@@ -223,9 +261,8 @@ def test_missing_context_remains_inconclusive():
     assert "unavailable" in notes
 
 
-@pytest.mark.parametrize("changes", [{"run_id": "other"}, {"item_id": "other"},
-                                     {"status": "failed"}])
-def test_unusable_or_wrong_scope_request_is_rejected(changes):
+@pytest.mark.parametrize("changes", [{"run_id": "other"}, {"item_id": "other"}])
+def test_wrong_scope_request_is_rejected(changes):
     target = artifact(compute_requests=["request-1"], cost=Cost(compute_units=2))
     status, _ = check(target, [request(**changes)], Cost(compute_units=2))
     assert status == VerifierStatus.rejected
