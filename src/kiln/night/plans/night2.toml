@@ -9,11 +9,11 @@ cap_check_s = 60
 stop_grace_s = 300
 
 [caps]
-# Night-wide hard stops (a breach stops the night cleanly). Provisional, from the Sat 5 PM dry run:
-# only the C1 and C3 controllers call Gemini (the specialists are rule-based), ~700 tokens per item
-# including thinking tokens, so 346 items x 2 conditions x 3 seeds is ~1.5 M tokens, ~$5.
+# Night-wide hard stops (a breach stops the night cleanly). From the Sat 6 PM dry run with the real
+# agents and gemini-3.8-flash (5 dev items, all conditions): only the C1 and C3 controllers call
+# Gemini (the specialists are rule-based), ~1,000 tokens and ~10 s per item including thinking tokens,
+# so 346 items x 2 conditions x 3 seeds is ~2.1 M tokens, ~$7, and ~5.8 h of Gemini time in sequence.
 # GPU: the proposal expects ~4.3 GPU-h with the cache against 7.7 h usable (protocol/prices_proposal.json).
-# CJ: replace with the real-agent dry-run numbers before launch.
 max_tokens = 5000000
 max_usd = 20.0
 max_gpu_hours = 8.0

@@ -100,6 +100,19 @@ def test_resume_skips_done_items_and_retries_an_interrupted_one(tmp_path: Path) 
         go(tmp_path, "C4", max_tool_calls_per_item=99)
 
 
+def test_a_second_process_cannot_run_the_same_run_at_once(tmp_path: Path) -> None:
+    from filelock import FileLock
+
+    run_dir = tmp_path / cfg("C4").run_id
+    run_dir.mkdir(parents=True)
+    with FileLock(str(run_dir / ".run.lock")):        # an orphaned earlier process still holds the run
+        with pytest.raises(SystemExit, match="already running"):
+            go(tmp_path, "C4")
+    assert not (run_dir / "predictions.jsonl").exists()
+    go(tmp_path, "C4")                                 # once it has gone, the run proceeds normally
+    assert len(jsonl(run_dir / "predictions.jsonl")) == 3
+
+
 class Fabricator(Agent):
     """Posts an energy no compute request produced: the verifier must reject it."""
     name = "thermo"

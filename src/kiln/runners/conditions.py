@@ -37,6 +37,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+from filelock import FileLock, Timeout
+
 from kiln.agents.base import PRICES_USD_PER_MTOK, Agent
 from kiln.board import Board
 from kiln.budget import Budget, BudgetExceeded
@@ -255,6 +257,21 @@ def run(cfg: RunConfig, items: Sequence[Item], components: Components, runs_dir:
         progress: Callable[[str], None] = print) -> Path:
     run_dir = Path(runs_dir) / cfg.run_id
     run_dir.mkdir(parents=True, exist_ok=True)
+    # One process per run. The night runner starts steps in their own session, so a killed runner
+    # can leave this process alive; a restarted copy must not run the same items alongside it.
+    lock = FileLock(str(run_dir / ".run.lock"))
+    try:
+        lock.acquire(timeout=0)
+    except Timeout:
+        raise SystemExit(f"{cfg.run_id} is already running in another process; retry when it finishes") from None
+    try:
+        return _run_locked(cfg, items, components, run_dir, progress)
+    finally:
+        lock.release()
+
+
+def _run_locked(cfg: RunConfig, items: Sequence[Item], components: Components, run_dir: Path,
+                progress: Callable[[str], None]) -> Path:
     _write_config(run_dir, cfg, components, len(items))
     pred_path, cost_path = run_dir / "predictions.jsonl", run_dir / "cost.json"
     done = {json.loads(line)["item_id"] for line in _lines(pred_path)}
