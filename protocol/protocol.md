@@ -202,8 +202,9 @@ Labels are never loaded before an **independently verified post** of the commitm
 
 - **P1.** Owners close every `OPEN-nn` item and write the values here with their sources.
 - **P2.** Record the code-freeze commit SHA for scoring, verifier, review flags, compute tiers, agents and runner.
-- **P3.** Compute the SHA-256 of the exact bytes of this file, post it through the channel in **OPEN-16**, and verify the receipt independently.
+- **P3.** Commit the closed protocol and push the commit to `dev`, which blocks force-pushes and deletion (`docs/github-setup.md`), so the commit stays reachable. That commit is the **Gate P commit**. The digest is the SHA-256 of `protocol/protocol.md` as stored in that commit, `git cat-file blob <gate-p-commit>:protocol/protocol.md | shasum -a 256`. It is never taken from a checked-out copy, so line endings and checkout settings cannot change it. Post the full Gate P commit SHA **together with** the digest through the channel in **OPEN-16**, and verify the receipt independently. Anyone can check the commitment by rerunning that command against the posted commit.
 - **P4.** Only after P3 may held-out runs start. Development runs may happen earlier.
+- **P5.** After the Gate P commit, `protocol/protocol.md` is never edited. The Gate P record (commit SHA, digest, posting receipt) and every later change go in `protocol/amendments.md`, which is never part of the Gate P hash. Writing the record into this file would change the bytes being committed to.
 
 ### Step 2: prediction commitment (Gate H), per run
 
@@ -213,7 +214,7 @@ Labels are never loaded before an **independently verified post** of the commitm
 - **H4.** Only after H3 does `kiln.scoring.evaluate` load labels. The evaluator fails closed with `EvaluationLockedError` unless a caller-supplied verifier returns the literal `True` for the digest.
 - **H5.** After unblinding, no prediction file changes. A re-run gets a new `run_id` and its own hash, and is reported next to the original.
 
-**Amendments.** Any change after Gate P is recorded in §16 with the date, the reason and who made it. Analyses decided after unblinding are labeled post hoc.
+**Amendments.** Any change after Gate P is recorded in `protocol/amendments.md` with the date, the reason and who made it. That file is outside the Gate P hash; this file stays exactly as it was in the Gate P commit. Analyses decided after unblinding are labeled post hoc.
 
 This draft has not been hashed, posted or frozen.
 
@@ -309,4 +310,4 @@ None of these may be filled in by an assistant. Each needs its owner's decision 
 
 ## 16. Amendments
 
-None. Amendments start only after Gate P.
+Amendments live in `protocol/amendments.md`, not here, so this file's bytes match the Gate P commit (§10, P3 and P5). That file also holds the Gate P record. It is never part of the Gate P hash.

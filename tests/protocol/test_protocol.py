@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 PROTOCOL = Path(__file__).resolve().parents[2] / "protocol" / "protocol.md"
+AMENDMENTS = PROTOCOL.with_name("amendments.md")
 
 
 def _register(text: str) -> set[str]:
@@ -46,6 +47,17 @@ class ProtocolDraftTest(unittest.TestCase):
             "| Held-out pairs | 369 |", "| Records missing a heating temperature | 54",
         ):
             self.assertIn(fact, self.text)
+
+    def test_gate_p_pins_a_commit_and_keeps_amendments_outside(self) -> None:
+        p3 = next(line for line in self.text.splitlines() if line.startswith("- **P3.**"))
+        self.assertIn("git cat-file blob <gate-p-commit>:protocol/protocol.md", p3)
+        self.assertIn("full Gate P commit SHA **together with** the digest", p3)
+        self.assertNotRegex(self.text, r"recorded in §16")
+        self.assertIn("`protocol/protocol.md` is never edited", self.text)
+        amendments = AMENDMENTS.read_text(encoding="utf-8")
+        self.assertIn("This file is **not** part of the Gate P hash.", amendments)
+        self.assertIn("Gate P has not happened.", amendments)
+        self.assertNotRegex(amendments, r"\b[0-9a-fA-F]{40,64}\b")
 
     def test_decisions_left_open(self) -> None:
         for open_id, topic in (
