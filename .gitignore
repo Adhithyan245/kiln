@@ -1,0 +1,29 @@
+# Secrets: never commit
+.env
+.env.*
+*.key
+secrets/
+
+# Locked labels: never in the repo until after scoring
+labels/
+
+# Raw and bulky data (fetched by scripts)
+data/raw/
+cache/
+*.extxyz
+*.traj
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Personal Claude Code notes (each person keeps their own)
+CLAUDE.local.md

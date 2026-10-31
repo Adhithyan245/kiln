@@ -1,0 +1,16 @@
+name: main-from-dev-only
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, edited]
+jobs:
+  source-is-dev:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Only the dev branch may merge into main
+        run: |
+          if [ "${{ github.head_ref }}" != "dev" ]; then
+            echo "This PR comes from '${{ github.head_ref }}'. Only 'dev' can merge into 'main'."
+            exit 1
+          fi
+          echo "Source branch is dev."
