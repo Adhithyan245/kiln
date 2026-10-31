@@ -7,7 +7,7 @@
 > - `OPEN-nn` marks a decision nobody has made yet. An assistant must not fill one in. Values come from the named owner, together with their source (a profiling log, a commit, or a team decision).
 > - "Settled" means the rule is already written in `AGENTS.md`, `docs/interfaces.md`, `src/kiln/schemas.py` or a team prompt. The source is cited each time.
 
-Sources used for this draft: `AGENTS.md`; `docs/interfaces.md`; `src/kiln/schemas.py`; `prompts/*.md`; the descriptions and code of open PRs #5 (verifier), #6 (data and split), #7 (scoring stubs), #8 (evaluator), #9 (B1 folds) and #10 (B0, B0-T); and the Gate 0 license and category evidence (kiln-9 artifact `gate0-license-evidence.md`). PRs #5 to #10 were all open, not merged, when this was written.
+Sources used for this draft: `AGENTS.md`; `docs/interfaces.md`; `src/kiln/schemas.py`; `prompts/*.md`; the descriptions and code of PRs #5 (verifier), #6 (data and split), #7 (scoring stubs), #8 (evaluator), #9 (B1 folds) and #10 (B0, B0-T); and the Gate 0 license and category evidence (kiln-9 artifact `gate0-license-evidence.md`). PRs #5 to #10 were open when this draft was first written; all six were merged into `dev` on 2026-10-31 (checked with `gh pr view` and against `origin/dev`). §4.2 also draws on the `b0.py` docstrings of PR #19, which is **open, not merged**, and OPEN-25 and OPEN-26 on `protocol/proposals/0001-standard-firing-claim.md`, a proposal that awaits Hemanath's decision.
 
 ---
 
@@ -85,7 +85,7 @@ Each condition produces one `Prediction` per item (`schemas.py`). It has `p_reac
 
 `AGENTS.md` names four arms: the collective, a single agent, isolated specialists and a central planner. Interfaces step 6 fixes only C1 and C3. No repo file says which of C2 and C4 is the collective. "Isolated specialists" is also not defined beyond its name, for example whether needs are disabled and whether specialists can read each other's artifacts. Both are **OPEN-01**.
 
-**Settled invariants across C1 to C4** (`prompts/adhi.md` Task 2; `AGENTS.md` rules 7, 8 and 11):
+**Settled invariants across C1 to C4** (`prompts/cj.md` Task 3; `AGENTS.md` rules 7, 8 and 11):
 
 - same items, locked budget, frozen tier prices and compute client;
 - same LLM provider (Gemini key only) and same model (**OPEN-04**);
@@ -97,12 +97,16 @@ Each condition produces one `Prediction` per item (`schemas.py`). It has `p_reac
 | ID | Rule | Status |
 |---|---|---|
 | B0 | Driving-force threshold: predict a reaction when the cached `dE_ev_per_atom` is at or below a threshold (PR #10) | Threshold **OPEN-08** |
-| B0-T | Tammann rule: predict a reaction when the furnace temperature reaches the governing Tammann temperature, `fraction × (mp_c + 273.15) − 273.15` (PR #10) | Fraction and either/both **OPEN-08** |
+| B0-T | Temperature ratio: rank items by `T_dwell / T_melt(higher)`, both in kelvin, from `Item.temperature_c` and the higher of the two melting points. Predict a reaction when the ratio is at or above `TemperatureRatioConfig.ratio_threshold`, which comes from config and has no default (PR #19, open) | Threshold **OPEN-25** |
+| B60meV | Competition-margin feature and regime marker, not a rule for whether a pair reacts: `margin = dE_competing − dE_best` in eV/atom (never negative), and `decisive = margin ≥ CompetitionMarginConfig.margin_threshold_ev_per_atom`, from config with no default. It has no `reacts`, `p_react` or category field (PR #19, open) | Threshold, and any mapping to `p_react` or `Category`, **OPEN-25** |
 | B1 | Logistic regression on development data, with leave-one-precursor-out folds that drop the left-out precursor from both pair positions (PR #9) | Features, fit and fold aggregation **OPEN-09** |
 
-- `prompts/annamayya.md` specifies two-thirds of the melting point in kelvin for `kiln.tools.tammann`. Whether B0-T uses that same fraction, and whether it requires either precursor or both, is **OPEN-08**.
-- B0 and B0-T output a binary decision with a signed margin in physical units, not a probability. How a decision becomes a `Prediction` (`p_react` in [0, 1] and a four-class category), and how B0's `cached_lookup` requests are charged and logged, is **OPEN-08**.
-- Missing inputs are never imputed: B0 and B0-T return an undetermined decision with a `missing_evidence` flag (PR #10).
+- **B0-T replaces a Tammann-fraction rule.** PR #10 put that rule on `dev`: predict a reaction when the furnace temperature reaches a Tammann temperature, `fraction × (mp_c + 273.15) − 273.15`, with a configured fraction and an either/both choice. `dev` still runs it until PR #19 merges. The ratio needs no fitted value; only its decision threshold comes from config. The two-thirds fraction that `prompts/annamayya.md` specifies for `kiln.tools.tammann` is therefore not a B0-T setting.
+- **Reason for the swap: reviewer-sourced and UNVERIFIED**, not checked against the dataset's own documentation. The dataset's firing temperature is reportedly set by Tammann's rule, which would make a rule that compares the furnace temperature with a Tammann temperature circular. If that holds, `temperature_c` depends on the melting points, and so does the ratio (PR #19 notes this).
+- **B60meV is a margin feature and regime marker only.** Its name comes from Szymanski et al., *Science Advances* 10(27), 2024, DOI `10.1126/sciadv.adp3309`, who found the **first product to form** predictable when its driving force exceeds that of every competing phase by at least 60 meV/atom. That finding is about which product forms first, not whether a pair reacts, so B60meV is never a validated reacts-or-does-not-react rule. The 60 meV/atom value is not a default; the threshold comes from config and is recorded on every result.
+- **B60meV is not a `ConditionId`** in `schemas.py`, so no `RunConfig` can name it and it yields no `Prediction`. Whether it should become one needs a shared-schema change. That is an open question; this draft does not settle it.
+- B0 outputs a binary decision with a signed margin in eV/atom. B0-T outputs a binary decision with the ratio as its ranking score. Neither is a probability. How a B0 or B0-T decision becomes a `Prediction` (`p_react` in [0, 1] and a four-class category), and how B0's `cached_lookup` requests are charged and logged, is **OPEN-08**. `to_predictions` fails closed for B0 and B0-T on `dev` (PR #12), and PR #19 keeps it failing closed with B60meV added.
+- Missing inputs are never imputed: B0, B0-T and B60meV return an undetermined result with a `missing_evidence` flag (PR #10; PR #19 for the B0-T ratio and B60meV). For B0-T, one missing melting point leaves the decision undetermined, because the missing one could be the higher.
 - B1 needs development labels to fit. See **OPEN-10**.
 
 ## 5. Locked budget and frozen price list
@@ -119,7 +123,7 @@ Each condition produces one `Prediction` per item (`schemas.py`). It has `p_reac
 
 | Item | Current state | Status |
 |---|---|---|
-| Tier prices for `cached_lookup`, `single_point`, `bounded_relaxation`, `decomposition_reeval` | `RunConfig.tier_prices` is empty, "frozen in the protocol at code freeze" | **OPEN-03** (CJ proposes from profiling, `prompts/cj.md` Task 3) |
+| Tier prices for `cached_lookup`, `single_point`, `bounded_relaxation`, `decomposition_reeval` | `RunConfig.tier_prices` is empty, "frozen in the protocol at code freeze" | **OPEN-03** (Adhi proposes from profiling, for Hemanath to freeze, `prompts/adhi.md` Task 4) |
 | `max_compute_units_per_item` | Schema placeholder; "final value set from profiling" | **OPEN-02** |
 | `max_tool_calls_per_item`, `max_tokens_per_item`, `coordination_rounds` | Schema defaults exist; nothing says they are the locked values | **OPEN-02** |
 | Experiment USD cap (`Cost.usd`) | Tracked per item; no cap stated | **OPEN-02** |
@@ -263,7 +267,7 @@ These rules are settled (`AGENTS.md` rule 1; `prompts/hemanath.md`; `.gitignore`
 - **Fixed-rule scores and flags.** `p_react` is not a calibrated probability. Review flags are not validated failure causes. Coverage depends on flag thresholds frozen before the runs.
 - **LLM variation and contamination.** LLM runs vary between seeds, and pretraining contamination cannot be ruled out (§11).
 - **Compute accounting.** GPU-seconds depend on cache state and run order. `moved_toward_label` is descriptive.
-- **Untested on real data.** The evaluator, verifier, scorer stubs, baselines and split code are tested on synthetic data only. None is merged into `dev` yet.
+- **Untested on real data.** The evaluator, verifier, scorer stubs, baselines and split code are tested on synthetic data only. They are merged into `dev` (PRs #5 to #10, with follow-ups #12, #13, #15 and #16). The B0-T ratio, B60meV and evaluator changes in PR #19 are not merged.
 
 ## 14. Gate 0 decisions
 
@@ -290,13 +294,13 @@ None of these may be filled in by an assistant. Each needs its owner's decision 
 | ID | Decision needed | Owner | Blocks |
 |---|---|---|---|
 | OPEN-01 | Which of C2 and C4 is the need-board collective and which is isolated specialists; what "isolated" means | Adhi | §4, every contrast |
-| OPEN-02 | Locked per-item budget: compute units, tool calls, tokens, coordination rounds, USD cap | CJ (profiling) and team | §5, Gate P |
-| OPEN-03 | Frozen price per compute tier | CJ | §5, Gate P |
+| OPEN-02 | Locked per-item budget: compute units, tool calls, tokens, coordination rounds, USD cap | Adhi (profiling) and team | §5, Gate P |
+| OPEN-03 | Frozen price per compute tier | Adhi proposes from profiling; Hemanath freezes | §5, Gate P |
 | OPEN-04 | Gemini model id and settings; number of seeds per condition and how they are combined | Adhi and team | §4, §8, §11 |
 | OPEN-05 | Scoring rules: `p_react`, category boundaries, cause and fix, evidence selection, in `score.score` and `score.provisional` | Hemanath | §3.3, every metric |
 | OPEN-06 | Review-flag thresholds (MLIP versus Materials Project disagreement, applicability limits) | Annamayya; values recorded here | §6, coverage |
 | OPEN-07 | Specialist escalation rules and margins | Annamayya; recorded here | §6, §9 |
-| OPEN-08 | B0 threshold; B0-T fraction and either/both; mapping a baseline decision to `p_react` and category; charging of B0's cached lookups | Hemanath | §4.2 |
+| OPEN-08 | B0 threshold; mapping a B0 or B0-T decision to `p_react` and category; charging of B0's cached lookups | Hemanath | §4.2 |
 | OPEN-09 | B1 feature set, model settings, fold aggregation (a pair appears in two folds), final fit | Hemanath | §4.2 |
 | OPEN-10 | Approved access path for development labels (B1 fitting, development AUROC, threshold setting), given hard rule 1 | Hemanath and team | §4.2, §12 |
 | OPEN-11 | Mapping from stored category strings to `Category` | Hemanath (approval needed to print distinct values) | §3.1 |
@@ -313,6 +317,8 @@ None of these may be filled in by an assistant. Each needs its owner's decision 
 | OPEN-22 | Exact attribution text for the dataset | Hemanath | §14 |
 | OPEN-23 | Handling of an item with no prediction from a condition | Adhi and Hemanath | §6, §7 |
 | OPEN-24 | Verifier contract gaps: `verify` signature in interfaces, `item_cost` accessor, tool APIs for `tool_values` | Adhi, Annamayya and Hemanath | §6 |
+| OPEN-25 | Mapping from the B60meV margin (or its `decisive` marker) to `p_react` or `Category`, if any; threshold values for B0-T (`ratio_threshold`) and B60meV (`margin_threshold_ev_per_atom`). Proposed in `protocol/proposals/0001` | Hemanath | §4.2 |
+| OPEN-26 | Label-free check of the ledger's formula notation. The carbonate, hydroxide and ammonium formula rules for the hard subset may miss pymatgen-style formulas such as `LiHO` or `H4NCl`. Proposed in `protocol/proposals/0001` (§3, hard subset); the notation gap was raised in PR #19 | Hemanath | Hard subset (proposal 0001 §3), if adopted |
 
 ## 16. Amendments
 
