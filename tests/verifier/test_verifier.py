@@ -1,5 +1,7 @@
 """Verifier tests use only synthetic artifacts."""
 
+import math
+
 import pytest
 from pydantic import ValidationError
 
@@ -283,6 +285,44 @@ def test_cumulative_item_limits_are_enforced(cost):
 def test_budget_limit_is_inclusive():
     cost = Cost(tool_calls=12, tokens_in=40000, compute_units=10)
     assert check(artifact(values={}), cost=cost)[0] == VerifierStatus.accepted
+
+
+def rounded_charges():
+    # The item total is derived as limit - remaining() while the agent sums its own
+    # charges, so the two totals for the same charges differ only by rounding.
+    charges, remaining, own = [0.1, 0.2, 0.3], 10.0, 0.0
+    for charge in charges:
+        remaining -= charge
+        own += charge
+    return charges, own, 10.0 - remaining
+
+
+def test_float_rounding_in_charges_is_not_a_budget_violation():
+    charges, own, item_total = rounded_charges()
+    assert own > item_total and math.fsum(charges) > item_total
+    requests = [request(request_id=f"request-{n}", compute_units=charge)
+                for n, charge in enumerate(charges, 1)]
+    target = artifact(compute_requests=[r.request_id for r in requests], claims=[claim()],
+                      cost=Cost(compute_units=own))
+    status, notes = check(target, requests, Cost(compute_units=item_total))
+    assert (status, notes) == (VerifierStatus.accepted, "Checks passed")
+
+
+def test_float_rounding_at_compute_limit_is_not_a_budget_violation():
+    _, own, _ = rounded_charges()
+    status, _ = verify(artifact(values={}), FakeBoard(), requests=[],
+                       config=config(max_compute_units_per_item=0.6),
+                       item_cost=Cost(compute_units=own), tool_values=None)
+    assert status == VerifierStatus.accepted
+
+
+def test_real_cost_excess_is_still_rejected():
+    _, _, item_total = rounded_charges()
+    target = artifact(values={}, cost=Cost(compute_units=0.61))
+    status, notes = check(target, [request(compute_units=0.61)], Cost(compute_units=item_total))
+    assert status == VerifierStatus.rejected
+    assert "Artifact cost exceeds cumulative item cost: compute_units" in notes
+    assert "Compute request charges exceed cumulative item cost" in notes
 
 
 @pytest.mark.parametrize("key", ["category", "reacted", "xrd_patterns", "refinement_results",

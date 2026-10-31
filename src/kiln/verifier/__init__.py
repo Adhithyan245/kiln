@@ -20,6 +20,15 @@ def _number(value: object) -> bool:
             and math.isfinite(value))
 
 
+def _close(a: float, b: float) -> bool:
+    # Charges are float tier prices; totals derived from them carry rounding.
+    return math.isclose(a, b, rel_tol=1e-9, abs_tol=1e-12)
+
+
+def _exceeds(value: float, limit: float) -> bool:
+    return value > limit and not _close(value, limit)
+
+
 def _forbidden_key(key: str) -> bool:
     normalized = re.sub(r"[^a-z0-9]+", "_", key.lower()).strip("_")
     return (normalized in {"category", "reacted", "reaction_category"}
@@ -148,8 +157,7 @@ def verify(
         charges = [request.compute_units for request in cited]
         if (all(math.isfinite(unit) and unit >= 0 for unit in charges)
                 and math.isfinite(artifact.cost.compute_units)
-                and not math.isclose(artifact.cost.compute_units, math.fsum(charges),
-                                     rel_tol=1e-9, abs_tol=1e-12)):
+                and not _close(artifact.cost.compute_units, math.fsum(charges))):
             errors.append("Artifact compute cost disagrees with cited request charges")
 
     if config is None or item_cost is None:
@@ -162,19 +170,19 @@ def verify(
             own = getattr(artifact.cost, name)
             if not math.isfinite(total) or not math.isfinite(own) or total < 0 or own < 0:
                 errors.append(f"Invalid cost: {name}")
-            elif own > total:
+            elif _exceeds(own, total):
                 errors.append(f"Artifact cost exceeds cumulative item cost: {name}")
         if item_cost.tool_calls > config.max_tool_calls_per_item:
             errors.append("Tool-call budget exceeded")
         if item_cost.tokens_in + item_cost.tokens_out > config.max_tokens_per_item:
             errors.append("Token budget exceeded")
-        if item_cost.compute_units > config.max_compute_units_per_item:
+        if _exceeds(item_cost.compute_units, config.max_compute_units_per_item):
             errors.append("Compute budget exceeded")
         if requests is not None:
             units = [request.compute_units for request in requests]
             if any(not math.isfinite(unit) or unit < 0 for unit in units):
                 errors.append("Invalid compute request cost")
-            elif sum(units) > item_cost.compute_units:
+            elif _exceeds(math.fsum(units), item_cost.compute_units):
                 errors.append("Compute request charges exceed cumulative item cost")
 
     if errors:
