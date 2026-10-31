@@ -26,8 +26,9 @@ import os
 import platform
 import subprocess
 import time
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -38,11 +39,12 @@ from pymatgen.io.ase import AseAtomsAdaptor
 
 from kiln.compute.backends import BackendResult, Result
 from kiln.compute.convergence import converged, max_force, max_stress
+from kiln.compute.energy_reference import corrected_entry, phase_differences
 from kiln.schemas import ComputeStatus, ComputeTier
 from kiln.tools import mp
 
-__all__ = ["CalculatorFactory", "LocalBackend", "first_calcs", "mace_calculator", "run_tier",
-           "structure_from_cache"]
+__all__ = ["CalculatorFactory", "LocalBackend", "StructureResult", "TierRun", "bounded_relaxation",
+           "first_calcs", "mace_calculator", "run_tier", "single_point", "structure_from_cache"]
 
 FIRST_CALCS_PATH = Path("cache") / "first_calcs.json"
 TIER_SETTINGS_PATH = Path("env") / "gb10" / "tier_settings.json"
@@ -82,8 +84,29 @@ def _mp_lookup(inputs: dict[str, Any], cache_dir: Path) -> BackendResult:
                                             "source": "materials_project"})
 
 
-def _decomposition(inputs: dict[str, Any], cache_dir: Path) -> BackendResult:
+def _decomposition(inputs: dict[str, Any], cache_dir: Path, settings: dict[str, Any] | None = None,
+                   calculator_factory: CalculatorFactory | None = None) -> BackendResult:
+    """Two input forms: {"temperature_c", "properties": {formula: {decomposes_at_c,
+    decomposition_product}}} decides decomposition from the furnace temperature (kiln.compute.
+    decomposition); {"decomposed": {precursor: product}} uses a decision already made."""
     a, b = _pair(inputs)
+    if "properties" in inputs:
+        from kiln.compute.decomposition import reevaluate
+
+        if "temperature_c" not in inputs:
+            raise ValueError("inputs with properties need temperature_c")
+        r = reevaluate(a, b, float(inputs["temperature_c"]), dict(inputs["properties"]), cache_dir=cache_dir,
+                       settings=settings or None, calculator_factory=calculator_factory)
+        if r.status == ComputeStatus.failed:
+            return BackendResult(ComputeStatus.failed, {"error": r.error})
+        return BackendResult(ComputeStatus.ok, {
+            "dE_ev_per_atom": r.dE_after_ev_per_atom, "products": r.products_after,
+            "mixing_ratio": r.mixing_ratio_after, "reactants": r.reactants_after,
+            "dE_before_ev_per_atom": r.dE_before_ev_per_atom, "products_before": r.products_before,
+            "decomposed": ", ".join(f"{k}->{v}" for k, v in r.decomposed.items()),
+            "decomposition_unknown": ", ".join(r.unknown), "changed": r.changed,
+            "filled_by_single_point": ", ".join(r.filled_by_single_point),
+            "source": "materials_project"})
     decomposed: dict[str, str] = dict(inputs.get("decomposed") or {})
     unknown = set(decomposed) - {a, b}
     if unknown:
@@ -127,22 +150,17 @@ def _mlip(tier: ComputeTier, inputs: dict[str, Any], settings: dict[str, Any], c
         return BackendResult(ComputeStatus.failed,
                              {"error": f"structures above max_atoms={max_atoms}: {', '.join(map(str, too_big))}"})
 
-    calc = calculator_factory(settings)
     relax = tier == ComputeTier.bounded_relaxation
-    mlip_entries: list[ComputedEntry] = []
-    not_converged: list[str] = []
-    steps_used = 0
-    for entry in phases:
-        atoms = AseAtomsAdaptor.get_atoms(entry.structure)
-        atoms.calc = calc
-        if relax:
-            ok, steps = _relax(atoms, settings)
-            steps_used = max(steps_used, steps)
-            if not ok:
-                not_converged.append(str(entry.entry_id))
-        energy = float(atoms.get_potential_energy())          # raw MLIP total, eV, for this cell
-        mlip_entries.append(ComputedEntry(entry.composition, energy, correction=entry.correction,
-                                          entry_id=entry.entry_id))
+    run = (bounded_relaxation if relax else single_point)(
+        [e.structure for e in phases], settings, calculator_factory=calculator_factory)
+    failed = [f"{e.entry_id}: {r.error}" for e, r in zip(phases, run.results) if r.status == ComputeStatus.failed]
+    if failed:
+        return BackendResult(ComputeStatus.failed, {"error": "; ".join(failed)})
+    totals = [float(r.energy_ev) for r in run.results]       # raw MLIP totals, eV, for each cell
+    mlip_entries = [corrected_entry(e, total) for e, total in zip(phases, totals)]
+    not_converged = [str(e.entry_id) for e, r in zip(phases, run.results) if r.status == ComputeStatus.not_converged]
+    steps_used = max((r.steps or 0 for r in run.results), default=0)
+    worst_phase = max(abs(d.mlip_minus_mp_ev_per_atom) for d in phase_differences(phases, totals))
 
     mlip_r = mp.reaction_energy(a, b, mlip_entries)
     mp_r = mp.reaction_energy(a, b, phases)
@@ -150,6 +168,7 @@ def _mlip(tier: ComputeTier, inputs: dict[str, Any], settings: dict[str, Any], c
         **_reaction_result(mlip_r),
         "dE_mp_ev_per_atom": mp_r.dE_ev_per_atom,
         "dE_mlip_minus_mp_ev_per_atom": mlip_r.dE_ev_per_atom - mp_r.dE_ev_per_atom,
+        "max_abs_phase_mlip_minus_mp_ev_per_atom": worst_phase,
         "mp_products": mp_r.products,
         "model": str(settings["model"]),
         "n_structures": len(phases),
@@ -177,6 +196,89 @@ def _relax(atoms: Any, settings: dict[str, Any]) -> tuple[bool, int]:
     return converged(atoms.get_forces(), atoms.get_stress(), fmax, s_tol), opt.nsteps
 
 
+# ---------- structure-level tiers ----------
+
+@dataclass(frozen=True)
+class StructureResult:
+    """One structure's outcome. Energies are raw MLIP values for the given cell (no MP2020
+    correction; see kiln.compute.energy_reference)."""
+    status: ComputeStatus
+    n_atoms: int
+    energy_ev: float | None = None
+    energy_ev_per_atom: float | None = None
+    max_force_ev_per_a: float | None = None
+    max_stress_ev_per_a3: float | None = None
+    steps: int | None = None            # relaxation only
+    error: str = ""
+
+
+@dataclass(frozen=True)
+class TierRun:
+    tier: ComputeTier
+    backend: str
+    settings: dict[str, Any]
+    results: list[StructureResult] = field(default_factory=list)
+    wall_s: float = 0.0
+    gpu_seconds: float = 0.0            # wall time on a CUDA device; 0 on CPU
+
+    @property
+    def status(self) -> ComputeStatus:
+        """failed if any structure failed, else not_converged if any didn't converge, else ok."""
+        statuses = {r.status for r in self.results}
+        for worst in (ComputeStatus.failed, ComputeStatus.not_converged):
+            if worst in statuses:
+                return worst
+        return ComputeStatus.ok
+
+
+def single_point(structures: Structure | Sequence[Structure], settings: dict[str, Any], *,
+                 calculator_factory: CalculatorFactory | None = None) -> TierRun:
+    """MLIP energy, forces and stress of each structure as given."""
+    return _run_structures(ComputeTier.single_point, structures, settings, calculator_factory)
+
+
+def bounded_relaxation(structures: Structure | Sequence[Structure], settings: dict[str, Any], *,
+                       calculator_factory: CalculatorFactory | None = None) -> TierRun:
+    """Variable-cell relaxation of each structure: converged only when max force <= fmax_ev_per_a
+    AND max |stress| <= stress_tol_ev_per_a3, within max_steps; otherwise not_converged."""
+    return _run_structures(ComputeTier.bounded_relaxation, structures, settings, calculator_factory)
+
+
+def _run_structures(tier: ComputeTier, structures: Structure | Sequence[Structure],
+                    settings: dict[str, Any], calculator_factory: CalculatorFactory | None) -> TierRun:
+    backend = str(settings.get("backend", "ase"))
+    if backend != "ase":
+        # "nvalchemi" (NVIDIA ALCHEMI Toolkit batched FIRE2 with a variable cell) is built and checked
+        # against this ASE path on the GB10, from the kit's alchemi-mlip-test.py recipe.
+        raise NotImplementedError(f"backend {backend!r} is not available yet; use 'ase'")
+    items = [structures] if isinstance(structures, Structure) else list(structures)
+    device = str(settings.get("device", "cuda"))
+    calc = (calculator_factory or mace_calculator)(settings)
+    relax = tier == ComputeTier.bounded_relaxation
+    results: list[StructureResult] = []
+    _sync(device)
+    start = time.perf_counter()
+    for structure in items:
+        n = len(structure)
+        try:
+            atoms = AseAtomsAdaptor.get_atoms(structure)
+            atoms.calc = calc
+            steps = None
+            status = ComputeStatus.ok
+            if relax:
+                ok, steps = _relax(atoms, settings)
+                status = ComputeStatus.ok if ok else ComputeStatus.not_converged
+            energy = float(atoms.get_potential_energy())
+            results.append(StructureResult(status, n, energy, energy / n, max_force(atoms.get_forces()),
+                                           max_stress(atoms.get_stress()), steps))
+        except Exception as exc:  # one bad structure is a logged failure, never a crash or a gap
+            results.append(StructureResult(ComputeStatus.failed, n, error=f"{type(exc).__name__}: {exc}"))
+    _sync(device)
+    wall = time.perf_counter() - start
+    gpu = wall if device.startswith("cuda") else 0.0
+    return TierRun(tier, backend, dict(settings), results, round(wall, 3), round(gpu, 3))
+
+
 def run_tier(tier: ComputeTier, inputs: dict[str, Any], settings: dict[str, Any], *,
              cache_dir: Path = mp.CACHE_DIR,
              calculator_factory: CalculatorFactory = mace_calculator) -> BackendResult:
@@ -184,7 +286,7 @@ def run_tier(tier: ComputeTier, inputs: dict[str, Any], settings: dict[str, Any]
     if tier == ComputeTier.cached_lookup:
         out = _mp_lookup(inputs, cache_dir)
     elif tier == ComputeTier.decomposition_reeval:
-        out = _decomposition(inputs, cache_dir)
+        out = _decomposition(inputs, cache_dir, settings, calculator_factory)
     elif tier in (ComputeTier.single_point, ComputeTier.bounded_relaxation):
         out = _mlip(tier, inputs, settings, cache_dir, calculator_factory)
     else:
@@ -215,9 +317,12 @@ def structure_from_cache(formula: str, cache_dir: Path = mp.CACHE_DIR) -> Comput
 def _sync(device: str) -> None:
     """Wait for queued GPU work so wall time measures the calculation, not the launch."""
     if str(device).startswith("cuda"):
-        import torch
-
-        torch.cuda.synchronize()
+        try:
+            import torch
+        except ImportError:  # fake calculators in tests need no torch
+            return
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
 
 
 def _measure(atoms: Any) -> dict[str, float]:
@@ -316,12 +421,15 @@ def main(argv: list[str] | None = None) -> int:
     fc.add_argument("--settings", type=Path, default=TIER_SETTINGS_PATH)
     fc.add_argument("--device", help="override the settings' device (cpu for a dry run)")
     fc.add_argument("--max-steps", type=int, help="override the step cap")
+    fc.add_argument("--dtype", choices=["float32", "float64"], help="override the settings' precision")
     fc.add_argument("--out", type=Path, default=FIRST_CALCS_PATH)
     args = parser.parse_args(argv)
 
     settings = dict(json.loads(args.settings.read_text(encoding="utf-8"))["bounded_relaxation"])
     if args.device:
         settings["device"] = args.device
+    if args.dtype:
+        settings["dtype"] = args.dtype
     if args.max_steps is not None:
         settings["max_steps"] = args.max_steps
     if args.structure_file:
