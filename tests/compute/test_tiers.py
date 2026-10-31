@@ -4,9 +4,13 @@ import json
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import pytest
-from ase.calculators.calculator import Calculator, all_changes
+
+pytest.importorskip("pymatgen", reason="compute extras (pymatgen) not installed; see env/gb10/setup.sh")
+pytest.importorskip("ase", reason="compute extras (ase) not installed; see env/gb10/setup.sh")
+
+import numpy as np  # noqa: E402
+from ase.calculators.calculator import Calculator, all_changes  # noqa: E402
 from pymatgen.core import Composition
 
 from kiln.budget import Budget

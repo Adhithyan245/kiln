@@ -4,7 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from kiln.tools import mp
+pytest.importorskip("pymatgen", reason="compute extras (pymatgen) not installed; see env/gb10/setup.sh")
+
+from kiln.tools import mp  # noqa: E402
 from tests.tools.mp_fixtures import ca_ti_o_entries
 
 
