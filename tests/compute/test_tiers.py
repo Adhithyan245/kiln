@@ -279,3 +279,36 @@ def test_relaxation_tier_reports_worst_phase_mlip_minus_mp(cache_dir: Path) -> N
 def test_unknown_backend_is_refused_loudly(cache_dir: Path) -> None:
     with pytest.raises(NotImplementedError):
         single_point(_structures(cache_dir), {**MLIP, "backend": "nope"}, calculator_factory=factory(FakeMLIP()))
+
+
+# ---------- phase set: only what the a-b reaction depends on ----------
+
+from kiln.compute.tiers import _on_join, _phase_set
+
+
+def test_phase_set_reproduces_the_full_reaction_energy(cache_dir: Path) -> None:
+    full = mp.load_entries("Ca-O-Ti", cache_dir=cache_dir)
+    phases = _phase_set("CaO", "TiO2", {"ehull_max_ev_per_atom": 0.1, "max_structures": 40}, cache_dir)
+    assert len(phases) <= len(full)
+    r_full, r_small = mp.reaction_energy("CaO", "TiO2", full), mp.reaction_energy("CaO", "TiO2", phases)
+    assert r_small.dE_ev_per_atom == pytest.approx(r_full.dE_ev_per_atom, abs=1e-9)
+    assert r_small.products == r_full.products
+
+
+def test_phase_set_always_keeps_reactants_products_and_elements(cache_dir: Path) -> None:
+    phases = _phase_set("CaO", "TiO2", {"ehull_max_ev_per_atom": 0.1, "max_structures": 0}, cache_dir)  # no competitors
+    formulas = {e.composition.reduced_formula for e in phases}
+    assert {"CaO", "TiO2", "CaTiO3"} <= formulas                 # reactants and the product
+    assert {"Ca", "Ti", "O2"} <= formulas                        # elemental references
+
+
+def test_competitors_are_capped(cache_dir: Path) -> None:
+    required = _phase_set("CaO", "TiO2", {"ehull_max_ev_per_atom": 0.1, "max_structures": 0}, cache_dir)
+    capped = _phase_set("CaO", "TiO2", {"ehull_max_ev_per_atom": 0.1, "max_structures": len(required) + 1}, cache_dir)
+    assert len(required) <= len(capped) <= len(required) + 1
+
+
+def test_on_join() -> None:
+    a, b = Composition("CaO"), Composition("TiO2")
+    assert _on_join(Composition("CaTiO3"), a, b) and _on_join(Composition("Ca2TiO4"), a, b)
+    assert not _on_join(Composition("Ti2O3"), a, b) and not _on_join(Composition("Ca"), a, b)

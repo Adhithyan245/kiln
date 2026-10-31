@@ -33,6 +33,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+from pymatgen.analysis.interface_reactions import InterfacialReactivity
+from pymatgen.analysis.phase_diagram import PhaseDiagram
 from pymatgen.core import Composition, Structure
 from pymatgen.entries.computed_entries import ComputedEntry, ComputedStructureEntry
 from pymatgen.io.ase import AseAtomsAdaptor
@@ -118,22 +121,61 @@ def _decomposition(inputs: dict[str, Any], cache_dir: Path, settings: dict[str, 
                                             "source": "materials_project"})
 
 
+def _on_join(comp: Composition, a: Composition, b: Composition, tol: float = 1e-3) -> bool:
+    """Whether comp's atomic fractions lie on the line between a's and b's (pseudo-binary phases)."""
+    els = sorted({*a.elements, *b.elements, *comp.elements}, key=str)
+    fa = np.array([a.get_atomic_fraction(e) for e in els])
+    fb = np.array([b.get_atomic_fraction(e) for e in els])
+    fc = np.array([comp.get_atomic_fraction(e) for e in els])
+    d = fa - fb
+    x = float(np.dot(fc - fb, d) / np.dot(d, d)) if np.dot(d, d) else 0.0
+    return -tol <= x <= 1 + tol and float(np.linalg.norm(fc - (fb + x * d))) <= tol
+
+
 def _phase_set(a: str, b: str, settings: dict[str, Any], cache_dir: Path) -> list[ComputedEntry]:
-    """Candidates within the hull window, plus each precursor's lowest-energy entry."""
+    """The phases the a-b reaction energy depends on, not the whole chemical system.
+
+    The interface reaction energy between a and b depends only on the convex hull along the a-b
+    mixing line. So the set is: (1) the stable phases every a-b mixture decomposes into, at each
+    kink of the reaction curve and between kinks, which reproduces Materials Project's reaction
+    energy exactly; (2) the reactants' own lowest-energy entries; (3) the elemental references the
+    phase diagram needs; then (4) near-hull competitors (e_hull <= ehull_max_ev_per_atom) lying on
+    the a-b line, lowest first, up to max_structures: the phases an MLIP might re-rank.
+    """
     window = float(settings["ehull_max_ev_per_atom"])
-    phases = mp.candidates(a, b, ehull_max_ev_per_atom=window, cache_dir=cache_dir)
-    all_entries = mp.load_entries(mp.chemsys_for(a, b), cache_dir=cache_dir)
-    ids = {e.entry_id for e in phases}
-    for formula in (a, b):
+    cap = int(settings["max_structures"])
+    entries = mp.load_entries(mp.chemsys_for(a, b), cache_dir=cache_dir)
+    pd = PhaseDiagram(entries)
+    ca, cb = Composition(a), Composition(b)
+    keep: dict[str, ComputedEntry] = {}
+
+    def add(e: ComputedEntry) -> None:
+        keep.setdefault(str(e.entry_id), e)
+
+    ir = InterfacialReactivity(ca, cb, pd, norm=True, use_hull_energy=False)
+    xs = sorted({float(k[1]) for k in ir.get_kinks()} | {0.0, 1.0})
+    probes = xs + [(x0 + x1) / 2 for x0, x1 in zip(xs, xs[1:])]
+    fa, fb = ca.fractional_composition, cb.fractional_composition
+    for x in probes:                                              # (1) decomposition along the join
+        mix = Composition({el: x * fa[el] + (1 - x) * fb[el] for el in {*fa.elements, *fb.elements}})
+        for e in pd.get_decomposition(mix):
+            add(e)
+    for formula in (a, b):                                        # (2) reactants as they are
         target = Composition(formula).reduced_formula
-        matching = [e for e in all_entries if e.composition.reduced_formula == target]
+        matching = [e for e in entries if e.composition.reduced_formula == target]
         if not matching:
             raise ValueError(f"no Materials Project entry for precursor {formula}")
-        best = min(matching, key=lambda e: e.energy_per_atom)
-        if best.entry_id not in ids:
-            phases.append(best)
-            ids.add(best.entry_id)
-    return phases
+        add(min(matching, key=lambda e: e.energy_per_atom))
+    for e in pd.el_refs.values():                                  # (3) elemental references
+        add(e)
+    competitors = sorted((e for e in entries if str(e.entry_id) not in keep
+                          and pd.get_e_above_hull(e) <= window and _on_join(e.composition, ca, cb)),
+                         key=pd.get_e_above_hull)
+    for e in competitors:                                          # (4) near-hull competitors, up to the cap
+        if len(keep) >= cap:
+            break
+        add(e)
+    return list(keep.values())
 
 
 def _mlip(tier: ComputeTier, inputs: dict[str, Any], settings: dict[str, Any], cache_dir: Path,
