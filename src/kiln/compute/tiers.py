@@ -12,25 +12,40 @@ Inputs (all tiers): {"precursor_a": "CaO", "precursor_b": "TiO2"}; decomposition
 MLIP energies are put on the Materials Project scale by adding the MP2020 correction MP applied to
 the same entry (MACE-MPA-0 is trained on raw GGA/GGA+U energies), then the reaction energy is
 recomputed on the same phase set as the MP value it is compared with. Result keys carry units.
+
+First calculations on a new host (Task 1): one single point and one bounded relaxation on one
+structure, saved to cache/first_calcs.json. On the GB10:
+    export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+    python -m kiln.compute.tiers first-calcs --formula TiO2
 """
 from __future__ import annotations
 
+import argparse
+import json
+import os
+import platform
+import subprocess
 import time
+from datetime import datetime, timezone
 from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from pymatgen.core import Composition
-from pymatgen.entries.computed_entries import ComputedEntry
+from pymatgen.core import Composition, Structure
+from pymatgen.entries.computed_entries import ComputedEntry, ComputedStructureEntry
 from pymatgen.io.ase import AseAtomsAdaptor
 
 from kiln.compute.backends import BackendResult, Result
-from kiln.compute.convergence import converged
+from kiln.compute.convergence import converged, max_force, max_stress
 from kiln.schemas import ComputeStatus, ComputeTier
 from kiln.tools import mp
 
-__all__ = ["CalculatorFactory", "LocalBackend", "mace_calculator", "run_tier"]
+__all__ = ["CalculatorFactory", "LocalBackend", "first_calcs", "mace_calculator", "run_tier",
+           "structure_from_cache"]
+
+FIRST_CALCS_PATH = Path("cache") / "first_calcs.json"
+TIER_SETTINGS_PATH = Path("env") / "gb10" / "tier_settings.json"
 
 CalculatorFactory = Callable[[dict[str, Any]], Any]   # settings -> ASE calculator
 
@@ -179,6 +194,150 @@ def run_tier(tier: ComputeTier, inputs: dict[str, Any], settings: dict[str, Any]
     return BackendResult(out.status, out.result, gpu_seconds=time.perf_counter() - start if gpu else 0.0)
 
 
+def structure_from_cache(formula: str, cache_dir: Path = mp.CACHE_DIR) -> ComputedStructureEntry:
+    """Lowest-energy Materials Project structure for a formula, from the local cache.
+
+    The cache holds one file per pair's chemical system (e.g. Ca-O-Ti.json), so every cached
+    system that contains the formula's elements is searched, not only its own.
+    """
+    target = Composition(formula).reduced_formula
+    elements = set(mp.chemsys_for(formula).split("-"))
+    entries: list[ComputedStructureEntry] = []
+    for path in sorted(Path(cache_dir).glob("*.json")):
+        if elements <= set(path.stem.split("-")):
+            entries += [e for e in mp.load_entries(path.stem, cache_dir=cache_dir)
+                        if isinstance(e, ComputedStructureEntry) and e.composition.reduced_formula == target]
+    if not entries:
+        raise ValueError(f"no cached Materials Project structure for {target} in {cache_dir}")
+    return min(entries, key=lambda e: e.energy_per_atom)
+
+
+def _sync(device: str) -> None:
+    """Wait for queued GPU work so wall time measures the calculation, not the launch."""
+    if str(device).startswith("cuda"):
+        import torch
+
+        torch.cuda.synchronize()
+
+
+def _measure(atoms: Any) -> dict[str, float]:
+    n = len(atoms)
+    return {"energy_ev_per_atom": float(atoms.get_potential_energy()) / n,
+            "max_force_ev_per_a": max_force(atoms.get_forces()),
+            "max_stress_ev_per_a3": max_stress(atoms.get_stress())}
+
+
+def _timed(device: str, work: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+    """Run one calculation; a crash is recorded as status failed, never raised or dropped."""
+    _sync(device)
+    start = time.perf_counter()
+    try:
+        out = work()
+    except Exception as exc:
+        out = {"status": ComputeStatus.failed.value, "error": f"{type(exc).__name__}: {exc}"}
+    _sync(device)
+    wall = time.perf_counter() - start
+    gpu = str(device).startswith("cuda")
+    return {**out, "wall_s": round(wall, 3), "gpu_seconds": round(wall, 3) if gpu else 0.0}
+
+
+def _host() -> dict[str, Any]:
+    info: dict[str, Any] = {"platform": platform.platform(), "python": platform.python_version(),
+                            "PYTORCH_CUDA_ALLOC_CONF": os.environ.get("PYTORCH_CUDA_ALLOC_CONF")}
+    try:
+        info["nvidia_driver"] = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name,driver_version", "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=20, check=True).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        info["nvidia_driver"] = None
+    return info
+
+
+def first_calcs(structure: Structure, settings: dict[str, Any], *, source: str,
+                calculator_factory: CalculatorFactory | None = None) -> dict[str, Any]:
+    """One single point and one bounded relaxation (force AND stress, step cap) on one structure.
+
+    settings are the bounded_relaxation block of env/gb10/tier_settings.json: model, device,
+    dtype, fmax_ev_per_a, stress_tol_ev_per_a3, max_steps. The calculator is built (and its
+    weights loaded) before timing starts, so wall time covers only the calculations.
+    """
+    device = str(settings.get("device", "cuda"))
+    calc = (calculator_factory or mace_calculator)(settings)
+
+    def single_point() -> dict[str, Any]:
+        atoms = AseAtomsAdaptor.get_atoms(structure)
+        atoms.calc = calc
+        return {"status": ComputeStatus.ok.value, **_measure(atoms)}
+
+    def relaxation() -> dict[str, Any]:
+        atoms = AseAtomsAdaptor.get_atoms(structure)
+        atoms.calc = calc
+        ok, steps = _relax(atoms, settings)
+        status = ComputeStatus.ok if ok else ComputeStatus.not_converged
+        return {"status": status.value, "steps": steps, "max_steps": int(settings["max_steps"]),
+                **_measure(atoms), "final_volume_a3": float(atoms.get_volume()),
+                "initial_volume_a3": float(structure.volume)}
+
+    return {
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "formula": structure.composition.reduced_formula,
+        "n_atoms": len(structure),
+        "source": source,
+        "device": device,
+        "cpu_dry_run": not device.startswith("cuda"),
+        "settings": {k: settings[k] for k in sorted(settings)},
+        "host": _host(),
+        "single_point": _timed(device, single_point),
+        "bounded_relaxation": _timed(device, relaxation),
+    }
+
+
+def _print_table(record: dict[str, Any]) -> None:
+    print(f"{record['formula']} ({record['n_atoms']} atoms) from {record['source']} on {record['device']}"
+          + ("  [CPU DRY RUN, not the GB10 result]" if record["cpu_dry_run"] else ""))
+    for name in ("single_point", "bounded_relaxation"):
+        r = record[name]
+        if r["status"] == ComputeStatus.failed.value:
+            print(f"  {name:<19} FAILED  {r['error']}")
+            continue
+        steps = f"  steps {r['steps']}/{r['max_steps']}" if "steps" in r else ""
+        print(f"  {name:<19} {r['status']:<13} E {r['energy_ev_per_atom']:.5f} eV/atom"
+              f"  max F {r['max_force_ev_per_a']:.4f} eV/A  max stress {r['max_stress_ev_per_a3']:.5f} eV/A^3"
+              f"{steps}  wall {r['wall_s']} s  GPU {r['gpu_seconds']} s")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="python -m kiln.compute.tiers")
+    sub = parser.add_subparsers(dest="command", required=True)
+    fc = sub.add_parser("first-calcs", help="one single point and one bounded relaxation (Task 1)")
+    fc.add_argument("--formula", default="TiO2", help="oxide to take from the Materials Project cache")
+    fc.add_argument("--cache-dir", type=Path, default=mp.CACHE_DIR)
+    fc.add_argument("--structure-file", type=Path, help="use this CIF/POSCAR instead of the cache")
+    fc.add_argument("--settings", type=Path, default=TIER_SETTINGS_PATH)
+    fc.add_argument("--device", help="override the settings' device (cpu for a dry run)")
+    fc.add_argument("--max-steps", type=int, help="override the step cap")
+    fc.add_argument("--out", type=Path, default=FIRST_CALCS_PATH)
+    args = parser.parse_args(argv)
+
+    settings = dict(json.loads(args.settings.read_text(encoding="utf-8"))["bounded_relaxation"])
+    if args.device:
+        settings["device"] = args.device
+    if args.max_steps is not None:
+        settings["max_steps"] = args.max_steps
+    if args.structure_file:
+        structure, source = Structure.from_file(str(args.structure_file)), f"file:{args.structure_file.name}"
+    else:
+        entry = structure_from_cache(args.formula, args.cache_dir)
+        structure, source = entry.structure, f"materials_project:{entry.entry_id}"
+
+    record = first_calcs(structure, settings, source=source)
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(json.dumps(record, indent=2), encoding="utf-8")
+    _print_table(record)
+    print(f"saved {args.out}")
+    return 0 if record["single_point"]["status"] != ComputeStatus.failed.value else 1
+
+
 class LocalBackend:
     """Runs tiers in this process: on the GPU host inside the service, or in tests."""
 
@@ -195,4 +354,8 @@ class LocalBackend:
 
     def healthy(self) -> bool:
         return self.cache_dir.is_dir()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
 
