@@ -2,6 +2,8 @@
 
 import unittest
 
+from pydantic import ValidationError
+
 from kiln.baselines.b1 import FeatureRow, leave_one_precursor_out, validate_features
 
 
@@ -9,9 +11,9 @@ class B1Tests(unittest.TestCase):
     def setUp(self):
         self.names = ("synthetic_x", "synthetic_y")
         self.rows = (
-            FeatureRow("one", "A", "B", "dev", (1.0, 2.0)),
-            FeatureRow("two", "C", "A", "dev", (3.0, 4.0)),
-            FeatureRow("three", "C", "D", "dev", (5.0, 6.0)),
+            FeatureRow(item_id="one", precursor_a="A", precursor_b="B", split="dev", values=(1.0, 2.0)),
+            FeatureRow(item_id="two", precursor_a="C", precursor_b="A", split="dev", values=(3.0, 4.0)),
+            FeatureRow(item_id="three", precursor_a="C", precursor_b="D", split="dev", values=(5.0, 6.0)),
         )
 
     def test_folds_exclude_held_out_precursor_from_both_positions(self):
@@ -31,14 +33,23 @@ class B1Tests(unittest.TestCase):
         for names, rows in (
             ((), self.rows),
             (("x", "x"), self.rows),
-            (self.names, (FeatureRow("x", "A", "B", "heldout", (1, 2)),)),
-            (self.names, (FeatureRow("x", "A", "B", "dev", (1,)),)),
-            (self.names, (FeatureRow("x", "A", "B", "dev", (1, float("nan"))),)),
-            (self.names, (FeatureRow("x", "A", "B", "dev", (1, True)),)),
+            (self.names, (FeatureRow(item_id="x", precursor_a="A", precursor_b="B", split="heldout", values=(1, 2)),)),
+            (self.names, (FeatureRow(item_id="x", precursor_a="A", precursor_b="B", split="dev", values=(1,)),)),
             (self.names, (self.rows[0], self.rows[0])),
         ):
             with self.subTest(names=names, rows=rows), self.assertRaises(ValueError):
                 validate_features(names, rows)
+
+    def test_models_reject_invalid_values_and_are_frozen(self):
+        for values in ((1, True), (1, float("nan")), (1, float("inf")), (1, "2")):
+            with self.subTest(values=values), self.assertRaises(ValidationError):
+                FeatureRow(item_id="x", precursor_a="A", precursor_b="B", split="dev", values=values)
+        with self.assertRaises(ValidationError):
+            FeatureRow(item_id="x", precursor_a="A", precursor_b="B", split="other", values=(1, 2))
+        with self.assertRaises(ValidationError):
+            self.rows[0].split = "heldout"
+        with self.assertRaises(ValidationError):
+            leave_one_precursor_out(self.names, self.rows)[0].precursor = "changed"
 
     def test_rejects_fold_without_training_rows(self):
         with self.assertRaisesRegex(ValueError, "no training rows"):

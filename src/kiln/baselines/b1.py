@@ -7,26 +7,40 @@ explicit, outcome-independent features; validation cannot establish provenance
 or prove that a feature does not encode an outcome.
 """
 
-from dataclasses import dataclass
 from math import isfinite
 from numbers import Real
 from collections.abc import Sequence
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
-@dataclass(frozen=True)
-class FeatureRow:
+class FeatureRow(BaseModel):
     """Explicit feature values for one development pair, in declared order."""
+
+    model_config = ConfigDict(frozen=True)
 
     item_id: str
     precursor_a: str
     precursor_b: str
-    split: str
+    split: Literal["dev", "heldout"]
     values: tuple[float, ...]
 
+    @field_validator("values", mode="before")
+    @classmethod
+    def validate_values(cls, values: object) -> object:
+        if not isinstance(values, (tuple, list)) or any(
+            isinstance(value, bool) or not isinstance(value, Real) or not isfinite(value)
+            for value in values
+        ):
+            raise ValueError("feature values must be finite real numbers")
+        return values
 
-@dataclass(frozen=True)
-class PrecursorFold:
+
+class PrecursorFold(BaseModel):
     """Indices into the original rows; test rows contain the held-out precursor."""
+
+    model_config = ConfigDict(frozen=True)
 
     precursor: str
     train_indices: tuple[int, ...]
@@ -77,5 +91,5 @@ def leave_one_precursor_out(feature_names: Sequence[str], rows: Sequence[Feature
         train = tuple(i for i, row in enumerate(rows) if precursor not in (row.precursor_a, row.precursor_b))
         if not train:
             raise ValueError(f"no training rows remain for precursor {precursor!r}")
-        folds.append(PrecursorFold(precursor, train, test))
+        folds.append(PrecursorFold(precursor=precursor, train_indices=train, test_indices=test))
     return tuple(folds)
