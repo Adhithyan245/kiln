@@ -50,3 +50,26 @@ def test_rejects_wrong_item_and_duplicate_requests(item):
     request.item_id = item.item_id
     with pytest.raises(ValueError, match="duplicate request"):
         score(item, [], [request, request], [])
+
+
+def test_rejects_mixed_artifact_runs(item, artifact):
+    other = artifact.model_copy(update={"artifact_id": "other", "run_id": "other-run"})
+    with pytest.raises(ValueError, match="different runs"):
+        provisional(item, [artifact, other])
+    with pytest.raises(ValueError, match="different runs"):
+        score(item, [artifact, other], [], [])
+
+
+def test_rejects_request_from_different_run(item, artifact):
+    request = ComputeRequest(request_id="r", run_id="other-run", item_id=item.item_id, agent="thermo",
+                             tier="cached_lookup", reason="synthetic", inputs={}, settings={}, cache_key="key")
+    with pytest.raises(ValueError, match="different runs"):
+        score(item, [artifact], [request], [])
+
+
+def test_rejects_mixed_request_runs_without_artifacts(item):
+    request = ComputeRequest(request_id="r", run_id="run", item_id=item.item_id, agent="thermo",
+                             tier="cached_lookup", reason="synthetic", inputs={}, settings={}, cache_key="key")
+    other = request.model_copy(update={"request_id": "other", "run_id": "other-run"})
+    with pytest.raises(ValueError, match="different runs"):
+        score(item, [], [request, other], [])

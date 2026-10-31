@@ -16,8 +16,9 @@ class ScoringConfigurationError(RuntimeError):
     """The frozen scoring rules and required run context are not configured."""
 
 
-def _validate_artifacts(item: Item, accepted: Sequence[Artifact]) -> None:
+def _validate_artifacts(item: Item, accepted: Sequence[Artifact]) -> str | None:
     seen: set[str] = set()
+    run_id: str | None = None
     for artifact in accepted:
         if artifact.verifier != VerifierStatus.accepted:
             raise ValueError(f"artifact {artifact.artifact_id!r} is not verifier-accepted")
@@ -26,6 +27,10 @@ def _validate_artifacts(item: Item, accepted: Sequence[Artifact]) -> None:
         if artifact.artifact_id in seen:
             raise ValueError(f"duplicate artifact id: {artifact.artifact_id!r}")
         seen.add(artifact.artifact_id)
+        if run_id is not None and artifact.run_id != run_id:
+            raise ValueError("artifacts belong to different runs")
+        run_id = artifact.run_id
+    return run_id
 
 
 def _require_frozen_rules() -> NoReturn:
@@ -49,7 +54,7 @@ def score(
     flags: Sequence[ReviewFlag],
 ) -> Prediction:
     """Produce a prediction only after the scoring protocol is fixed."""
-    _validate_artifacts(item, accepted)
+    run_id = _validate_artifacts(item, accepted)
     seen: set[str] = set()
     for request in requests:
         if request.item_id != item.item_id:
@@ -57,4 +62,7 @@ def score(
         if request.request_id in seen:
             raise ValueError(f"duplicate request id: {request.request_id!r}")
         seen.add(request.request_id)
+        if run_id is not None and request.run_id != run_id:
+            raise ValueError("artifacts and requests belong to different runs")
+        run_id = request.run_id
     _require_frozen_rules()
