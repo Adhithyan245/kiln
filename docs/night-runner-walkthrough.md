@@ -30,11 +30,11 @@ Each condition run has its own folder `runs/<condition>-gemini-3.8-flash-s<seed>
 `timings.jsonl` (wall seconds per item), `failed_items.jsonl` (items that raised, with the error),
 `verifier.log` (artifacts not accepted), `needs_suppressed.jsonl` (C1/C2/C3), `board/<item>/attempt-<n>/`.
 
-Quick progress check from another tmux window:
+Quick progress check from another tmux window (one screen: predictions per run, crashed and finalized
+items, compute backend with STUB shouted, spend against caps, step states, last alerts):
 
 ```bash
-wc -l runs/*-heldout/predictions.jsonl     # 346 per run when finished
-cat runs/*-heldout/failed_items.jsonl 2>/dev/null | tail
+python -m kiln.night status src/kiln/night/plans/night2.toml
 ```
 
 ## A healthy heartbeat (every 30 min)

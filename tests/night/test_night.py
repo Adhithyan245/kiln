@@ -369,3 +369,21 @@ def test_cli_dry_run_on_bundled_plan(tmp_path: Path, capsys) -> None:
     assert main(["run", str(PLANS / "night2.toml"), "--dry-run", "--state-dir", str(tmp_path / "s")]) == 0
     out = capsys.readouterr().out
     assert "fetch_labels" in out and "requires_receipt" in out
+
+
+def test_status_reports_progress_spend_and_shouts_about_stub_compute(tmp_path: Path, capsys) -> None:
+    from kiln.night.__main__ import main as night_main
+    from kiln.runners.conditions import run, run_id_for, stub_components
+    from kiln.schemas import Item, RunConfig
+
+    items = [Item(item_id=f"T-{n}", source="precursor_genome", precursor_a="CaO", precursor_b="TiO2",
+                  temperature_c=1000.0, split="dev") for n in range(2)]
+    runs = tmp_path / "runs"
+    run(RunConfig(run_id=run_id_for("C4", "offline", 0, "dev"), condition="C4", seed=0, model="offline"),
+        items, stub_components(), runs, progress=lambda _: None)
+    plan = tmp_path / "p.toml"
+    plan.write_text("name = 'p'\n[caps]\nmax_tokens = 100\nmax_usd = 1.0\nmax_gpu_hours = 1.0\n"
+                    "[[steps]]\nname = 'a'\ncmd = ['x']\n")
+    assert night_main(["status", str(plan), "--runs-dir", str(runs)]) == 0
+    out = capsys.readouterr().out
+    assert "2/2 predicted" in out and "STUB COMPUTE" in out and "spend:" in out and "no state yet" in out
