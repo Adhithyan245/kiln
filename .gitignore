@@ -9,6 +9,7 @@ labels/
 
 # Raw and bulky data (fetched by scripts)
 data/raw/
+data/ledger_precursor_genome.json
 cache/
 *.extxyz
 *.traj
@@ -17,6 +18,7 @@ cache/
 __pycache__/
 *.pyc
 .venv/
+.pytest_cache/
 venv/
 .ipynb_checkpoints/
 

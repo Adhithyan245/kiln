@@ -1,6 +1,6 @@
 """Shared data models for Kiln. Every module imports from here.
 
-Change this file only through a PR into dev, and update docs/interfaces.md in the same PR.
+Change this file only after telling the team, and update docs/interfaces.md in the same commit.
 """
 from __future__ import annotations
 

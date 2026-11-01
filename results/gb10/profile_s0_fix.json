@@ -1,0 +1,43 @@
+{
+  "host": "promaxgb10-99ea",
+  "machine": "aarch64",
+  "tiers": {
+    "cached_lookup": {
+      "n": 20,
+      "status": {
+        "ok": 20,
+        "cached": 0,
+        "not_converged": 0,
+        "failed": 0
+      },
+      "median_gpu_seconds": 0.0,
+      "p90_gpu_seconds": 0.0,
+      "median_relative_to_single_point": 0.0
+    },
+    "single_point": {
+      "n": 20,
+      "status": {
+        "ok": 20,
+        "cached": 0,
+        "not_converged": 0,
+        "failed": 0
+      },
+      "median_gpu_seconds": 0.49578814350024913,
+      "p90_gpu_seconds": 0.7364142740007082,
+      "median_relative_to_single_point": 1.0
+    },
+    "bounded_relaxation": {
+      "n": 20,
+      "status": {
+        "ok": 13,
+        "cached": 0,
+        "not_converged": 7,
+        "failed": 0
+      },
+      "median_gpu_seconds": 14.785125326500747,
+      "p90_gpu_seconds": 147.16023664100067,
+      "median_relative_to_single_point": 29.821458056899495
+    }
+  },
+  "note": "Measurements only. Prices and the per-item budget are set by CJ (OPEN-02/03)."
+}

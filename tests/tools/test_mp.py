@@ -1,0 +1,99 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+pytest.importorskip("pymatgen", reason="compute extras (pymatgen) not installed; see env/gb10/setup.sh")
+
+from kiln.tools import mp  # noqa: E402
+from tests.tools.mp_fixtures import ca_ti_o_entries
+
+
+def test_chemsys_is_sorted_and_deduplicated() -> None:
+    assert mp.chemsys_for("TiO2", "CaO") == "Ca-O-Ti"
+    assert mp.chemsys_for("Li2CO3", "TiO2") == "C-Li-O-Ti"
+
+
+def test_pair_chemsys_from_precursor_list(tmp_path: Path) -> None:
+    listing = tmp_path / "precursors.txt"
+    listing.write_text("# made-up list\nCaO\nTiO2\nLi2CO3  # carbonate\n\nCaO\n", encoding="utf-8")
+    formulas = mp._read_precursors(listing)
+    assert formulas == ["CaO", "TiO2", "Li2CO3", "CaO"]
+    assert mp.pair_chemsys_from_precursors(formulas) == ["C-Ca-Li-O", "C-Li-O-Ti", "Ca-O-Ti"]
+
+
+def test_pair_chemsys_from_items_file_covers_only_the_listed_pairs(tmp_path: Path) -> None:
+    from kiln.compute.profile import write_items_file
+    from tests.compute.helpers import make_item
+
+    items = [make_item("PG-1"), make_item("PG-2").model_copy(update={"precursor_a": "CaO", "split": "heldout"})]
+    path = tmp_path / "items.jsonl"
+    write_items_file(path, items)
+    assert mp._all_pair_chemsys(path) == ["C-Ca-O-Ti", "Ca-O-Ti"]
+
+
+def test_reaction_energy_finds_the_favoured_product() -> None:
+    result = mp.reaction_energy("CaO", "TiO2", ca_ti_o_entries())
+    assert result.products == "CaTiO3"
+    assert result.dE_ev_per_atom == pytest.approx(-0.04, abs=1e-9)
+    assert result.mixing_ratio == pytest.approx(0.4, abs=1e-9)  # per-atom fraction of CaO
+
+
+def test_no_reaction_is_zero() -> None:
+    entries = [e for e in ca_ti_o_entries() if e.composition.reduced_formula != "CaTiO3"]
+    assert mp.reaction_energy("CaO", "TiO2", entries).dE_ev_per_atom == pytest.approx(0.0, abs=1e-9)
+
+
+def test_cache_round_trip_keeps_structures_and_corrections(tmp_path: Path) -> None:
+    entries = ca_ti_o_entries()
+    mp._write_entries(tmp_path / "Ca-O-Ti.json", entries)
+    loaded = mp.load_entries("Ca-O-Ti", cache_dir=tmp_path)
+    assert [e.entry_id for e in loaded] == [e.entry_id for e in entries]
+    assert all(e.structure is not None for e in loaded)
+    assert [e.correction for e in loaded] == pytest.approx([e.correction for e in entries])
+    assert [e.energy for e in loaded] == pytest.approx([e.energy for e in entries])
+
+
+def test_missing_cache_raises(tmp_path: Path) -> None:
+    with pytest.raises(mp.MissingCache):
+        mp.load_entries("Ca-O-Ti", cache_dir=tmp_path)
+
+
+def test_candidates_apply_the_hull_window(tmp_path: Path) -> None:
+    mp._write_entries(tmp_path / "Ca-O-Ti.json", ca_ti_o_entries())
+    ids = {e.entry_id.split("-", 2)[2] for e in mp.candidates("CaO", "TiO2", cache_dir=tmp_path)}
+    assert "CaTiO3_meta" in ids and "Ca2O2" not in ids
+    assert {"Ca", "Ti", "O2", "CaO", "TiO2", "CaTiO3"} <= ids
+
+
+def test_fetch_skips_cached_system_without_network(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("MP_API_KEY", raising=False)
+    mp._write_entries(tmp_path / "Ca-O-Ti.json", ca_ti_o_entries())
+    assert mp.fetch_chemsys("Ca-O-Ti", cache_dir=tmp_path) == tmp_path / "Ca-O-Ti.json"
+
+
+def test_fetch_without_key_fails_loudly(tmp_path: Path, monkeypatch) -> None:
+    pytest.importorskip("mp_api")
+    monkeypatch.delenv("MP_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="MP_API_KEY"):
+        mp.fetch_chemsys("Ca-O-Ti", cache_dir=tmp_path)
+
+
+def test_cache_write_handles_real_mp_entry_types(tmp_path: Path) -> None:
+    """Real MP entries carry data["oxidation_states"] keyed by Element objects and a non-string
+    entry_id, neither of which JSON can hold, so the cache stores both as strings."""
+    from pymatgen.core import Element
+
+    class EntryID:  # stands in for the id type MP returns
+        def __str__(self) -> str:
+            return "mp-554278-GGA"
+
+    entries = ca_ti_o_entries()
+    entries[0].data = {"oxidation_states": {Element("Ti"): 4.0, Element("O"): -2.0}}
+    entries[0].entry_id = EntryID()
+    mp._write_entries(tmp_path / "Ca-O-Ti.json", entries)
+    loaded = mp.load_entries("Ca-O-Ti", cache_dir=tmp_path)
+    assert loaded[0].data["oxidation_states"] == {"Ti": 4.0, "O": -2.0}
+    assert loaded[0].entry_id == "mp-554278-GGA"
+    assert len(loaded) == len(entries)

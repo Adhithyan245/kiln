@@ -1,0 +1,14 @@
+{
+ "_note": "PROVISIONAL dry-run settings, not the freeze",
+ "tier_prices": {
+  "cached_lookup": 0.1,
+  "single_point": 1.0,
+  "bounded_relaxation": 30.0,
+  "decomposition_reeval": 0.2
+ },
+ "max_tool_calls_per_item": 12,
+ "max_tokens_per_item": 40000,
+ "max_compute_units_per_item": 32.0,
+ "energy_margin_ev_per_atom": 0.05,
+ "disagreement_threshold_ev_per_atom": 0.05
+}

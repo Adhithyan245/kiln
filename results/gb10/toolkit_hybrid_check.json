@@ -1,0 +1,29 @@
+{
+  "n_structures": 40,
+  "runs": {
+    "ase": {
+      "converged": 40,
+      "n_finished_by_ase": 0,
+      "gpu_seconds": 27.087
+    },
+    "nvalchemi": {
+      "converged": 39,
+      "n_finished_by_ase": 0,
+      "gpu_seconds": 26.737
+    },
+    "nvalchemi+ase": {
+      "converged": 40,
+      "n_finished_by_ase": 0,
+      "gpu_seconds": 14.434
+    }
+  },
+  "hybrid_vs_ase_max_mev_per_atom": 0.2525329589833092,
+  "real_pair_CaO_TiO2": {
+    "status": "ok",
+    "backend": "nvalchemi+ase",
+    "n_finished_by_ase": 12,
+    "dE_ev_per_atom": -0.131032371520992,
+    "dE_mp_ev_per_atom": -0.13269656749999648,
+    "n_structures": 40
+  }
+}

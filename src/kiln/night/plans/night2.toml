@@ -1,0 +1,130 @@
+# Night 2: all conditions -> predictions manifest -> hash posted -> labels -> score -> push -> stop Brev.
+# Run on the GPU host inside tmux:  python -m kiln.night run src/kiln/night/plans/night2.toml
+# Rehearse first with --dry-run, then a dev-only copy of this plan on 5 items.
+
+name = "night2"
+labels_must_be_absent = true   # labels may arrive only through fetch_labels, after the receipt
+heartbeat_s = 1800
+cap_check_s = 60
+stop_grace_s = 300
+
+[caps]
+# Night-wide hard stops (a breach stops the night cleanly). From the Sat 7:15 PM GB10 dry run with the
+# real agents (every specialist and controller calls gemini-3.8-flash), 5 dev items, all conditions:
+# tokens per item C1 2,621 / C2 1,550 / C3 2,950 / C4 1,827, $0.022 per item across the four, and
+# wall time 28.6 / 17.4 / 33.2 / 19.9 s. For 346 items x 3 seeds: ~9.3 M tokens and ~$23, so the caps
+# leave ~30% headroom. Gemini time is ~28.6 h in sequence; the night only fits with parallel runs
+# (--parallel), a cheaper model or fewer seeds, which is Adhi's call.
+# GPU: the proposal expects ~4.3 GPU-h with the cache against 7.7 h usable (protocol/prices_proposal.json).
+max_tokens = 12000000
+max_usd = 30.0
+max_gpu_hours = 8.0
+
+[retry]
+base_s = 30
+factor = 2
+jitter = 0.25
+max_delay_s = 900
+
+[gate]
+receipt = "protocol/posts.jsonl"
+manifest = "protocol/predictions.manifest.json"
+
+[[steps]]
+name = "preflight"
+cmd = ["python", "-c", "import kiln.compute.client, kiln.scoring.score; print('imports ok')"]
+timeout_s = 300
+retries = 0
+note = "Labels-absent check is done by the runner before any step."
+
+[[steps]]
+name = "run_conditions"
+# C1-C4 x seeds 0-2 on the held-out items, one seed of every condition first, resumable per item.
+# The ledger is not on the GB10, so items come from the agent-visible file. protocol/frozen_settings.json
+# (tier_prices, the max_* caps per item and the agents' thresholds) is written at the freeze; until it
+# exists this step fails loudly. The model is always explicit (docs/compute-decisions.md).
+# --parallel 12 runs every condition/seed at once (Adhi's GB10 test: no 429s, ~5 GB RAM, ~3.6 h for
+# 346 items); each run keeps its own lock and resumes per item.
+cmd = ["python", "-m", "kiln.runners.conditions", "--split", "heldout", "--all-conditions", "--all-seeds",
+       "--model", "gemini-3.8-flash", "--items-file", "${HOME}/kiln-items.jsonl",
+       "--frozen", "protocol/frozen_settings.json", "--parallel", "12"]
+depends_on = ["preflight"]
+env = ["GEMINI_API_KEY"]
+timeout_s = 36000
+retries = 2
+
+[[steps]]
+name = "finalize"
+# OPEN-23: every held-out item gets a prediction before the hash. Items that crashed (failed_items.jsonl)
+# or were never reached are scored on empty evidence with a missing_evidence flag, cost = their logged
+# requests; recorded in finalized_items.jsonl with a count per run. Depends on run_conditions succeeding,
+# so a systemic failure (no key, service down) stops the night instead of hashing empty predictions.
+cmd = ["python", "-m", "kiln.runners.finalize", "--split", "heldout", "--items-file", "${HOME}/kiln-items.jsonl",
+       "--runs-dir", "runs"]
+depends_on = ["run_conditions"]
+timeout_s = 1800
+retries = 1
+
+[[steps]]
+name = "manifest"
+cmd = ["python", "-m", "kiln.night.prereg", "manifest", "--runs-dir", "runs", "--out", "protocol/predictions.manifest.json"]
+depends_on = ["finalize"]
+timeout_s = 600
+retries = 1
+
+[[steps]]
+name = "post_hash"
+cmd = ["python", "-m", "kiln.night.prereg", "post", "--manifest", "protocol/predictions.manifest.json", "--receipt", "protocol/posts.jsonl"]
+depends_on = ["manifest"]
+env = ["KILN_PREREG_WEBHOOK"]
+timeout_s = 300
+retries = 4
+
+[[steps]]
+name = "push"
+# Runs right after the hash post, before anything label-related, so predictions and the receipt are
+# committed even though scoring stops the night. The GB10 has no GitHub access: --allow-no-remote
+# commits locally and skips the push with a note; Adhi brings the results back in the morning.
+cmd = ["python", "-m", "kiln.night.gitpush", "--paths", "runs", "results", "protocol", "--message",
+       "night2: predictions, receipt and results", "--allow-no-remote"]
+depends_on = ["post_hash"]
+timeout_s = 600
+retries = 3
+
+[[steps]]
+name = "fetch_labels"
+# Stop-and-alert: the label source and its independent receipt check are not written (OPEN-16).
+# The night stops cleanly here, after predictions, manifest, hash post and push.
+cmd = ["python", "-m", "kiln.night.notready", "fetch_labels", "label source and receipt check (OPEN-16)", "Hemanath"]
+depends_on = ["push"]
+requires_receipt = true
+timeout_s = 600
+retries = 0
+on_fail = "stop"
+
+[[steps]]
+name = "score"
+# Stop-and-alert: kiln.scoring.evaluate has no CLI and verify_posted_hash is not wired yet.
+cmd = ["python", "-m", "kiln.night.notready", "score", "evaluate CLI with verify_posted_hash", "Hemanath"]
+depends_on = ["fetch_labels"]
+requires_receipt = true
+timeout_s = 1800
+retries = 0
+on_fail = "stop"
+
+[[steps]]
+name = "figures"
+cmd = ["python", "-m", "kiln.night.notready", "figures", "results/comparison.json and figures", "Hemanath/Adhi"]
+depends_on = ["score"]
+timeout_s = 1800
+retries = 0
+
+[[steps]]
+name = "stop_brev"
+cmd = ["brev", "stop", "${BREV_INSTANCE}"]
+env = ["BREV_INSTANCE"]
+on_missing_env = "skip"
+always = true
+timeout_s = 300
+retries = 2
+note = "Skipped with a note when Brev was not used."

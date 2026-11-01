@@ -1,0 +1,230 @@
+{
+  "created_at": "2026-10-31T19:56:15.035730+00:00",
+  "host": "promaxgb10-99ea",
+  "settings": {
+    "model": "medium-mpa-0",
+    "device": "cuda",
+    "dtype": "float32",
+    "fmax_ev_per_a": 0.05,
+    "stress_tol_ev_per_a3": 0.001,
+    "max_steps": 500
+  },
+  "structures": [
+    "TiO2 mp-554278-GGA (12 atoms)",
+    "CaO mp-2605-GGA (2 atoms)",
+    "CaTiO3 mp-4019-GGA (20 atoms)",
+    "CaCO3 mp-3953-GGA (10 atoms)"
+  ],
+  "tiers": {
+    "single_point": {
+      "rows": [
+        {
+          "structure": "TiO2 mp-554278-GGA (12 atoms)",
+          "ase": {
+            "status": "ok",
+            "n_atoms": 12,
+            "energy_ev": -107.6364974975586,
+            "energy_ev_per_atom": -8.969708124796549,
+            "max_force_ev_per_a": 0.06573655282790349,
+            "max_stress_ev_per_a3": 0.007513732183724642,
+            "steps": null,
+            "error": ""
+          },
+          "nvalchemi": {
+            "status": "ok",
+            "n_atoms": 12,
+            "energy_ev": -107.6364974975586,
+            "energy_ev_per_atom": -8.969708124796549,
+            "max_force_ev_per_a": 0.06573645827289565,
+            "max_stress_ev_per_a3": 0.007513543125241995,
+            "steps": null,
+            "error": ""
+          },
+          "delta_mev_per_atom": 0.0
+        },
+        {
+          "structure": "CaO mp-2605-GGA (2 atoms)",
+          "ase": {
+            "status": "ok",
+            "n_atoms": 2,
+            "energy_ev": -12.881192207336426,
+            "energy_ev_per_atom": -6.440596103668213,
+            "max_force_ev_per_a": 1.884014218688229e-07,
+            "max_stress_ev_per_a3": 0.002825309056788683,
+            "steps": null,
+            "error": ""
+          },
+          "nvalchemi": {
+            "status": "ok",
+            "n_atoms": 2,
+            "energy_ev": -12.881189346313477,
+            "energy_ev_per_atom": -6.440594673156738,
+            "max_force_ev_per_a": 5.051814429006757e-07,
+            "max_stress_ev_per_a3": 0.0028253623750060797,
+            "steps": null,
+            "error": ""
+          },
+          "delta_mev_per_atom": 0.001
+        },
+        {
+          "structure": "CaTiO3 mp-4019-GGA (20 atoms)",
+          "ase": {
+            "status": "ok",
+            "n_atoms": 20,
+            "energy_ev": -161.78497314453125,
+            "energy_ev_per_atom": -8.089248657226562,
+            "max_force_ev_per_a": 0.016164325770139577,
+            "max_stress_ev_per_a3": 0.0023072639014571905,
+            "steps": null,
+            "error": ""
+          },
+          "nvalchemi": {
+            "status": "ok",
+            "n_atoms": 20,
+            "energy_ev": -161.78497314453125,
+            "energy_ev_per_atom": -8.089248657226562,
+            "max_force_ev_per_a": 0.016164481049849622,
+            "max_stress_ev_per_a3": 0.002307223156094551,
+            "steps": null,
+            "error": ""
+          },
+          "delta_mev_per_atom": 0.0
+        },
+        {
+          "structure": "CaCO3 mp-3953-GGA (10 atoms)",
+          "ase": {
+            "status": "ok",
+            "n_atoms": 10,
+            "energy_ev": -74.87960052490234,
+            "energy_ev_per_atom": -7.4879600524902346,
+            "max_force_ev_per_a": 0.03891478619571531,
+            "max_stress_ev_per_a3": 0.004415365867316723,
+            "steps": null,
+            "error": ""
+          },
+          "nvalchemi": {
+            "status": "ok",
+            "n_atoms": 10,
+            "energy_ev": -74.87960052490234,
+            "energy_ev_per_atom": -7.4879600524902346,
+            "max_force_ev_per_a": 0.038914287171273085,
+            "max_stress_ev_per_a3": 0.004415364470332861,
+            "steps": null,
+            "error": ""
+          },
+          "delta_mev_per_atom": 0.0
+        }
+      ],
+      "gpu_seconds": {
+        "ase": 0.715,
+        "nvalchemi": 1.413
+      },
+      "speedup_batched_vs_ase": 0.51
+    },
+    "bounded_relaxation": {
+      "rows": [
+        {
+          "structure": "TiO2 mp-554278-GGA (12 atoms)",
+          "ase": {
+            "status": "ok",
+            "n_atoms": 12,
+            "energy_ev": -107.64412689208984,
+            "energy_ev_per_atom": -8.970343907674154,
+            "max_force_ev_per_a": 0.004582581649590305,
+            "max_stress_ev_per_a3": 0.0009886298794299364,
+            "steps": 14,
+            "error": ""
+          },
+          "nvalchemi": {
+            "status": "ok",
+            "n_atoms": 12,
+            "energy_ev": -107.64432525634766,
+            "energy_ev_per_atom": -8.97036043802897,
+            "max_force_ev_per_a": 9.493829135468725e-05,
+            "max_stress_ev_per_a3": 0.00014637521235272288,
+            "steps": 123,
+            "error": ""
+          },
+          "delta_mev_per_atom": -0.017
+        },
+        {
+          "structure": "CaO mp-2605-GGA (2 atoms)",
+          "ase": {
+            "status": "ok",
+            "n_atoms": 2,
+            "energy_ev": -12.881354331970215,
+            "energy_ev_per_atom": -6.440677165985107,
+            "max_force_ev_per_a": 3.2872593165787515e-07,
+            "max_stress_ev_per_a3": 0.0007248754263855517,
+            "steps": 3,
+            "error": ""
+          },
+          "nvalchemi": {
+            "status": "ok",
+            "n_atoms": 2,
+            "energy_ev": -12.881365776062012,
+            "energy_ev_per_atom": -6.440682888031006,
+            "max_force_ev_per_a": 2.4192115554116637e-06,
+            "max_stress_ev_per_a3": 5.432216312328819e-06,
+            "steps": 123,
+            "error": ""
+          },
+          "delta_mev_per_atom": -0.006
+        },
+        {
+          "structure": "CaTiO3 mp-4019-GGA (20 atoms)",
+          "ase": {
+            "status": "ok",
+            "n_atoms": 20,
+            "energy_ev": -161.78578186035156,
+            "energy_ev_per_atom": -8.089289093017578,
+            "max_force_ev_per_a": 0.004237916861484184,
+            "max_stress_ev_per_a3": 0.0009167278185486794,
+            "steps": 9,
+            "error": ""
+          },
+          "nvalchemi": {
+            "status": "ok",
+            "n_atoms": 20,
+            "energy_ev": -161.78602600097656,
+            "energy_ev_per_atom": -8.089301300048827,
+            "max_force_ev_per_a": 0.00012564960458607584,
+            "max_stress_ev_per_a3": 3.54875301127322e-05,
+            "steps": 123,
+            "error": ""
+          },
+          "delta_mev_per_atom": -0.012
+        },
+        {
+          "structure": "CaCO3 mp-3953-GGA (10 atoms)",
+          "ase": {
+            "status": "ok",
+            "n_atoms": 10,
+            "energy_ev": -74.88236999511719,
+            "energy_ev_per_atom": -7.488236999511718,
+            "max_force_ev_per_a": 0.02127031175498374,
+            "max_stress_ev_per_a3": 0.0009276605560444295,
+            "steps": 11,
+            "error": ""
+          },
+          "nvalchemi": {
+            "status": "ok",
+            "n_atoms": 10,
+            "energy_ev": -74.88233184814453,
+            "energy_ev_per_atom": -7.488233184814453,
+            "max_force_ev_per_a": 0.00011716814733322295,
+            "max_stress_ev_per_a3": 0.0009833599906414747,
+            "steps": 123,
+            "error": ""
+          },
+          "delta_mev_per_atom": 0.004
+        }
+      ],
+      "gpu_seconds": {
+        "ase": 0.638,
+        "nvalchemi": 2.998
+      },
+      "speedup_batched_vs_ase": 0.21
+    }
+  }
+}

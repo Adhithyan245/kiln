@@ -1,0 +1,42 @@
+{
+ "PG_0102": {
+  "tool_calls": 7,
+  "tokens_in": 1489,
+  "tokens_out": 1473,
+  "compute_units": 31.1,
+  "gpu_seconds": 0.0,
+  "usd": 0.0066405000000000014
+ },
+ "PG_0103": {
+  "tool_calls": 8,
+  "tokens_in": 1389,
+  "tokens_out": 1637,
+  "compute_units": 31.3,
+  "gpu_seconds": 26.053698798998084,
+  "usd": 0.007180500000000001
+ },
+ "PG_0104": {
+  "tool_calls": 7,
+  "tokens_in": 1447,
+  "tokens_out": 1454,
+  "compute_units": 31.1,
+  "gpu_seconds": 0.0,
+  "usd": 0.006537749999999999
+ },
+ "PG_0105": {
+  "tool_calls": 5,
+  "tokens_in": 1074,
+  "tokens_out": 2639,
+  "compute_units": 0.1,
+  "gpu_seconds": 0.0,
+  "usd": 0.01070175
+ },
+ "PG_0106": {
+  "tool_calls": 7,
+  "tokens_in": 1466,
+  "tokens_out": 1456,
+  "compute_units": 31.1,
+  "gpu_seconds": 0.0,
+  "usd": 0.006559499999999999
+ }
+}
