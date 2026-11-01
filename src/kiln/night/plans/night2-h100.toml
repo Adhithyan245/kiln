@@ -21,7 +21,10 @@ stop_grace_s = 300
 # Same as night2.toml: ~9.3 M tokens and ~$23 expected for 346 items x 4 conditions x 3 seeds.
 max_tokens = 12000000
 max_usd = 30.0
-max_gpu_hours = 8.0
+# GPU-seconds are summed over the 12 parallel runs. The Nov 1 run hit a flat 8 GPU-h at 2,953 of 4,152
+# predictions (~11 GPU-h for the whole night) and was raised to 14 (amendments); 1.2 per worker is 14.4.
+max_gpu_hours_per_worker = 1.2
+workers = 12
 
 [retry]
 base_s = 30
@@ -43,12 +46,23 @@ timeout_s = 300
 retries = 0
 
 [[steps]]
+name = "canary"
+# One real lookup and one real single point before anything else: fails unless the lookup cites the
+# Materials Project and the single point comes from a real MLIP (the GB10 stub-backend lesson).
+cmd = ["python", "-m", "kiln.runners.canary", "--split", "heldout", "--items-file", "${HOME}/kiln-items.jsonl",
+       "--runs-dir", "runs-h100"]
+depends_on = ["preflight"]
+env = ["KILN_COMPUTE_BACKEND"]
+timeout_s = 1800
+retries = 1
+
+[[steps]]
 name = "run_conditions"
 cmd = ["python", "-m", "kiln.runners.conditions", "--split", "heldout", "--all-conditions", "--all-seeds",
        "--model", "gemini-3.8-flash", "--items-file", "${HOME}/kiln-items.jsonl",
        "--frozen", "protocol/frozen_settings.json", "--parallel", "12", "--runs-dir", "runs-h100"]
-depends_on = ["preflight"]
-env = ["GEMINI_API_KEY_2"]
+depends_on = ["canary"]
+env = ["GEMINI_API_KEY_2", "KILN_COMPUTE_BACKEND"]
 timeout_s = 36000
 retries = 2
 

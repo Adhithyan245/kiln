@@ -1,4 +1,5 @@
 """python -m kiln.night run <plan.toml> [--dry-run] [--state-dir DIR] [--runs-dir runs] [--repo-root .]
+python -m kiln.night status <plan.toml> [--state-dir DIR] [--runs-dir runs]
 
 Meant to run inside tmux on the GPU host. Exit code 0 only if every step finished.
 """
@@ -22,10 +23,19 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--state-dir")
     r.add_argument("--runs-dir", default="runs")
     r.add_argument("--repo-root", default=".")
+    s = sub.add_parser("status", help="progress, spend against caps, step states and the last alerts")
+    s.add_argument("plan")
+    s.add_argument("--state-dir")
+    s.add_argument("--runs-dir", default="runs")
     args = p.parse_args(argv)
 
     plan = load_plan(args.plan)
     state_dir = Path(args.state_dir or Path(args.runs_dir) / "_night" / plan.name)
+    if args.cmd == "status":
+        from kiln.night.status import status_lines
+
+        print("\n".join(status_lines(plan, Path(args.runs_dir), state_dir)))
+        return 0
     alerter = Alerter(state_dir / "alerts.log", webhook_poster(), plan.name)
     runner = NightRunner(plan, state_dir, repo_root=args.repo_root, runs_dir=args.runs_dir, alerter=alerter)
     if args.dry_run:

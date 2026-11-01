@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import json
 import os
+import random
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
@@ -52,6 +54,22 @@ class LLMUnavailable(RuntimeError):
     """The provider can't be used: missing key, missing SDK, or the API call failed."""
 
 
+# Night 2 saw Gemini 503s; five items ended up scored on empty evidence (OPEN-23). Temporary provider
+# errors are retried with exponential backoff (2, 4, 8, 16, 32 s plus jitter, about a minute in all).
+RETRIES = 5
+BACKOFF_BASE_S = 2.0
+BACKOFF_MAX_S = 60.0
+_TRANSIENT = ("429", "500", "502", "503", "504", "resource_exhausted", "unavailable", "overloaded",
+              "rate limit", "rate_limit", "timed out", "timeout", "deadline", "temporarily")
+_sleep = time.sleep
+
+
+def _transient(exc: Exception) -> bool:
+    text = str(exc).lower()
+    missing_key = "in the environment" in text or "set gemini_api_key" in text
+    return not missing_key and any(marker in text for marker in _TRANSIENT)
+
+
 @dataclass(frozen=True)
 class LLMResponse:
     text: str
@@ -81,7 +99,15 @@ def llm_call(prompt: str, budget: Budget, config: RunConfig, *, system: str = ""
     they push the item over its token cap (BudgetExceeded is raised after recording)."""
     provider = provider_for(config.model)
     call = {"offline": _offline, "gemini": _gemini, "anthropic": _anthropic, "openai": _openai}[provider]
-    text, tokens_in, tokens_out = call(prompt, system, config)
+    for attempt in range(RETRIES + 1):
+        try:
+            text, tokens_in, tokens_out = call(prompt, system, config)
+            break
+        except LLMUnavailable as exc:
+            # Rate limits and overloads pass; a missing key, a 404 or a bad request does not.
+            if attempt == RETRIES or not _transient(exc):
+                raise
+            _sleep(min(BACKOFF_BASE_S * 2 ** attempt, BACKOFF_MAX_S) * (1 + 0.25 * random.random()))
     usd, notes = _usd(config.model, tokens_in, tokens_out)
     budget.record_usd(usd)
     budget.charge_tokens(tokens_in, tokens_out)

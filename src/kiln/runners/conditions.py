@@ -77,6 +77,7 @@ class Components:
     stubs: bool = False
     stub_parts: tuple[str, ...] = ()
     agent_settings: Mapping[str, float | None] = field(default_factory=dict)
+    compute_backend: str = ""   # recorded in config.json; "stub" there means fake energies
 
     def __post_init__(self) -> None:  # either field marks stand-ins; they always agree
         if self.stubs and not self.stub_parts:
@@ -95,7 +96,22 @@ def stub_components() -> Components:
         flags=stubs.stub_flags,
         scorer=stubs.StubScorer,
         stub_parts=("compute", "specialists", "tools", "flags", "scorer"),
+        compute_backend="stub",
     )
+
+
+REAL_BACKENDS = ("local", "http")
+
+
+def require_real_backend() -> str:
+    """The compute backend a real run will use. Fails closed unless KILN_COMPUTE_BACKEND names a real
+    one: it defaults to stub, and the Night 2 GB10 run computed every energy with the stub because
+    the variable was never set (protocol/amendments.md, 2026-11-01)."""
+    kind = os.environ.get("KILN_COMPUTE_BACKEND", "")
+    if kind not in REAL_BACKENDS:
+        raise SystemExit(f"KILN_COMPUTE_BACKEND is {kind or 'unset'!r}; a real run needs one of {REAL_BACKENDS} "
+                         "(the default is the stub, which returns fake energies)")
+    return kind
 
 
 AGENT_SETTINGS = ("energy_margin_ev_per_atom", "disagreement_threshold_ev_per_atom")
@@ -117,6 +133,7 @@ def real_components(agent_settings: Mapping[str, float | None]) -> Components:
     from kiln.scoring.score import frozen_engine
     from kiln.tools.tammann import item_tool_values
 
+    backend = require_real_backend()
     margin = agent_settings.get("energy_margin_ev_per_atom")
     disagree = agent_settings.get("disagreement_threshold_ev_per_atom")
     return Components(
@@ -129,6 +146,7 @@ def real_components(agent_settings: Mapping[str, float | None]) -> Components:
         flags=partial(flags, disagreement_threshold=disagree),
         scorer=frozen_engine,
         agent_settings={"energy_margin_ev_per_atom": margin, "disagreement_threshold_ev_per_atom": disagree},
+        compute_backend=backend,
     )
 
 
@@ -310,13 +328,15 @@ def _run_locked(cfg: RunConfig, items: Sequence[Item], components: Components, r
 def _write_config(run_dir: Path, cfg: RunConfig, components: Components, n_items: int) -> None:
     record = {"run_config": cfg.model_dump(), "stubs_used": components.stubs,
               "stub_parts": list(components.stub_parts), "agent_settings": dict(components.agent_settings),
+              "compute_backend": components.compute_backend,
               "git_sha": _git_sha(),
               "llm_prices_usd_per_mtok": {k: list(v) for k, v in PRICES_USD_PER_MTOK.items()},
               "agent_order": list(AGENT_ORDER), "n_items": n_items}
     path = run_dir / "config.json"
     if path.exists():  # resuming: the run's settings must not change underneath it
         old = json.loads(path.read_text(encoding="utf-8"))
-        if any(old.get(k) != record[k] for k in ("run_config", "stubs_used", "stub_parts", "agent_settings")):
+        if any(old.get(k) != record[k] for k in ("run_config", "stubs_used", "stub_parts", "agent_settings",
+                                                  "compute_backend")):
             raise SystemExit(f"{path} has different settings; use a new run id instead of resuming")
         return
     _atomic_write(path, json.dumps(record, indent=2))

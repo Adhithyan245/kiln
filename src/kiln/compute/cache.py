@@ -1,8 +1,10 @@
-"""Content-addressed store of successful compute results.
+"""Content-addressed store of compute results.
 
 One JSON file per key under <root>/<key[:2]>/<key>.json. Writes go to a temporary file in the
-same folder and are renamed into place, so a crash never leaves a half-written entry. Only `ok`
-results are stored; failed and non-converged results are logged by the client, never cached.
+same folder and are renamed into place, so a crash never leaves a half-written entry. `ok` results
+are reused as `cached` evidence. Not-converged results are stored with that status so parallel runs
+don't repeat the same failing relaxation; they are served as not_converged, never as evidence.
+Failed results are never stored.
 """
 from __future__ import annotations
 
@@ -27,16 +29,28 @@ class ResultCache:
         return self.root / key[:2] / f"{key}.json"
 
     def get(self, key: str) -> Result | None:
+        """The stored `ok` result, or None (also for a stored not-converged entry)."""
+        entry = self._entry(key)
+        return entry["result"] if entry is not None and entry.get("status", "ok") == "ok" else None
+
+    def get_not_converged(self, key: str) -> Result | None:
+        """The stored result of a calculation that did not converge, or None. It is never usable
+        evidence; it only saves recomputing the same failing relaxation in another run."""
+        entry = self._entry(key)
+        return entry["result"] if entry is not None and entry.get("status") == "not_converged" else None
+
+    def _entry(self, key: str) -> dict[str, Any] | None:
         path = self._path(key)
         if not path.exists():
             return None
-        entry: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
-        return entry["result"]
+        return json.loads(path.read_text(encoding="utf-8"))
 
-    def put(self, key: str, result: Result, *, tier: str, settings: dict[str, Any]) -> None:
+    def put(self, key: str, result: Result, *, tier: str, settings: dict[str, Any], status: str = "ok") -> None:
+        if status not in ("ok", "not_converged"):
+            raise ValueError(f"only ok and not_converged results are cached, not {status!r}")
         path = self._path(key)
         path.parent.mkdir(parents=True, exist_ok=True)
-        entry = {"key": key, "tier": tier, "settings": settings, "result": result}
+        entry = {"key": key, "tier": tier, "settings": settings, "result": result, "status": status}
         fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-", suffix=".json")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:

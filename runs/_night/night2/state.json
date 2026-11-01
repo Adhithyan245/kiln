@@ -1,0 +1,16 @@
+{
+  "plan": "night2",
+  "stopped": "cap: GPU-hour cap reached (8.15 >= 8.0)",
+  "steps": {
+    "preflight": "done",
+    "run_conditions": "not_run",
+    "finalize": "not_run",
+    "manifest": "not_run",
+    "post_hash": "not_run",
+    "push": "not_run",
+    "fetch_labels": "not_run",
+    "score": "not_run",
+    "figures": "not_run",
+    "stop_brev": "skipped:env ['BREV_INSTANCE']"
+  }
+}

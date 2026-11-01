@@ -18,7 +18,10 @@ stop_grace_s = 300
 # GPU: the proposal expects ~4.3 GPU-h with the cache against 7.7 h usable (protocol/prices_proposal.json).
 max_tokens = 12000000
 max_usd = 30.0
-max_gpu_hours = 8.0
+# GPU-seconds are summed over the 12 parallel runs, so the cap is per worker. Real compute (the H100 run,
+# Nov 1) needed ~11 GPU-h summed for the whole night; a flat 8 stopped it early. 1.2 per worker is 14.4.
+max_gpu_hours_per_worker = 1.2
+workers = 12
 
 [retry]
 base_s = 30
@@ -38,6 +41,18 @@ retries = 0
 note = "Labels-absent check is done by the runner before any step."
 
 [[steps]]
+name = "canary"
+# One real lookup and one real single point before anything else: fails unless the lookup cites the
+# Materials Project and the single point comes from a real MLIP. The first Night 2 GB10 run computed
+# every energy with the stub backend because KILN_COMPUTE_BACKEND was never set (amendments, Nov 1).
+cmd = ["python", "-m", "kiln.runners.canary", "--split", "heldout", "--items-file", "${HOME}/kiln-items.jsonl",
+       "--runs-dir", "runs"]
+depends_on = ["preflight"]
+env = ["KILN_COMPUTE_BACKEND"]
+timeout_s = 1800
+retries = 1
+
+[[steps]]
 name = "run_conditions"
 # C1-C4 x seeds 0-2 on the held-out items, one seed of every condition first, resumable per item.
 # The ledger is not on the GB10, so items come from the agent-visible file. protocol/frozen_settings.json
@@ -48,8 +63,8 @@ name = "run_conditions"
 cmd = ["python", "-m", "kiln.runners.conditions", "--split", "heldout", "--all-conditions", "--all-seeds",
        "--model", "gemini-3.8-flash", "--items-file", "${HOME}/kiln-items.jsonl",
        "--frozen", "protocol/frozen_settings.json", "--parallel", "12"]
-depends_on = ["preflight"]
-env = ["GEMINI_API_KEY"]
+depends_on = ["canary"]
+env = ["GEMINI_API_KEY", "KILN_COMPUTE_BACKEND"]
 timeout_s = 36000
 retries = 2
 

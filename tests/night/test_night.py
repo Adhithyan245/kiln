@@ -81,6 +81,31 @@ def test_night2_pushes_before_the_label_steps_and_stops_there() -> None:
     assert plan.step("manifest").depends_on == ["finalize"]
 
 
+def test_gpu_cap_can_be_given_per_worker() -> None:
+    from kiln.night.plan import Caps
+    from kiln.night.spend import Spend, breach
+
+    caps = Caps(max_tokens=10, max_usd=1.0, max_gpu_hours_per_worker=1.2, workers=12)
+    assert caps.complete() and caps.gpu_hours_cap == pytest.approx(14.4)
+    assert breach(Spend(gpu_seconds=10 * 3600), caps) is None              # 10 summed GPU-h is fine for 12 workers
+    assert "GPU-hour cap" in breach(Spend(gpu_seconds=15 * 3600), caps)
+    assert Caps(max_tokens=1, max_usd=1.0, max_gpu_hours=8.0).gpu_hours_cap == 8.0
+    with pytest.raises(ValueError):
+        Caps(max_tokens=1, max_usd=1.0, max_gpu_hours=8.0, max_gpu_hours_per_worker=1.0)
+    for name in ("night2.toml", "night2-h100.toml"):
+        plan = load_plan(PLANS / name)
+        assert plan.caps.workers == 12 and plan.caps.gpu_hours_cap == pytest.approx(14.4)
+
+
+@pytest.mark.parametrize("name", ["night2.toml", "night2-h100.toml"])
+def test_night2_plans_run_the_canary_and_require_a_backend_before_any_prediction(name: str) -> None:
+    plan = load_plan(PLANS / name)
+    order = [s.name for s in plan.order()]
+    assert order.index("preflight") < order.index("canary") < order.index("run_conditions")
+    assert plan.step("run_conditions").depends_on == ["canary"]
+    assert "KILN_COMPUTE_BACKEND" in plan.step("canary").env and "KILN_COMPUTE_BACKEND" in plan.step("run_conditions").env
+
+
 def test_h100_replication_never_writes_where_the_gb10_run_does() -> None:
     gb10, h100 = load_plan(PLANS / "night2.toml"), load_plan(PLANS / "night2-h100.toml")
     assert h100.caps.complete() and h100.labels_must_be_absent
@@ -92,7 +117,7 @@ def test_h100_replication_never_writes_where_the_gb10_run_does() -> None:
     assert "protocol/posts-h100.jsonl" in h100.step("post_hash").cmd
     shared = {"runs", "protocol/posts.jsonl", "protocol/predictions.manifest.json"}
     assert not shared & {a for s in h100.steps for a in s.cmd}             # no GB10 output path anywhere
-    assert h100.step("run_conditions").env == ["GEMINI_API_KEY_2"]
+    assert h100.step("run_conditions").env == ["GEMINI_API_KEY_2", "KILN_COMPUTE_BACKEND"]
     same = lambda plan: [a for a in plan.step("run_conditions").cmd if a not in ("--runs-dir", "runs-h100")]  # noqa: E731
     assert same(h100) == same(gb10)                                          # same experiment otherwise
     order = [s.name for s in h100.order()]
@@ -344,3 +369,21 @@ def test_cli_dry_run_on_bundled_plan(tmp_path: Path, capsys) -> None:
     assert main(["run", str(PLANS / "night2.toml"), "--dry-run", "--state-dir", str(tmp_path / "s")]) == 0
     out = capsys.readouterr().out
     assert "fetch_labels" in out and "requires_receipt" in out
+
+
+def test_status_reports_progress_spend_and_shouts_about_stub_compute(tmp_path: Path, capsys) -> None:
+    from kiln.night.__main__ import main as night_main
+    from kiln.runners.conditions import run, run_id_for, stub_components
+    from kiln.schemas import Item, RunConfig
+
+    items = [Item(item_id=f"T-{n}", source="precursor_genome", precursor_a="CaO", precursor_b="TiO2",
+                  temperature_c=1000.0, split="dev") for n in range(2)]
+    runs = tmp_path / "runs"
+    run(RunConfig(run_id=run_id_for("C4", "offline", 0, "dev"), condition="C4", seed=0, model="offline"),
+        items, stub_components(), runs, progress=lambda _: None)
+    plan = tmp_path / "p.toml"
+    plan.write_text("name = 'p'\n[caps]\nmax_tokens = 100\nmax_usd = 1.0\nmax_gpu_hours = 1.0\n"
+                    "[[steps]]\nname = 'a'\ncmd = ['x']\n")
+    assert night_main(["status", str(plan), "--runs-dir", str(runs)]) == 0
+    out = capsys.readouterr().out
+    assert "2/2 predicted" in out and "STUB COMPUTE" in out and "spend:" in out and "no state yet" in out

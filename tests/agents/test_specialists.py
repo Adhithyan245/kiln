@@ -78,7 +78,8 @@ def test_specialists_share_verified_synthetic_evidence(tmp_path):
         viewer.ROOT = tmp_path
         (tmp_path / "runs").mkdir()
         run.rename(tmp_path / "runs" / "synthetic")
-        assert "example" in viewer.render()
+        # This run used the stub compute backend, so the app must refuse to show it (fake energies).
+        assert "example" not in viewer.render()
         (tmp_path / "runs" / "synthetic").rename(run)
         kinetics_agent.step(item, board, budget)
         assert len(board.open_needs(item.item_id, ("firm_up_energy",))) == 1

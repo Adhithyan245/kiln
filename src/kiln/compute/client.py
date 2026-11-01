@@ -103,12 +103,16 @@ class ComputeClient:
         lock_dir.mkdir(parents=True, exist_ok=True)
         with FileLock(str(lock_dir / f"{key}.lock")):
             cached = self.cache.get(key)
+            stuck = None if cached is not None else self.cache.get_not_converged(key)
             if cached is not None:
                 outcome = BackendResult(ComputeStatus.cached, cached, gpu_seconds=0.0)
+            elif stuck is not None:  # same code, inputs and settings already failed to converge: say so again
+                outcome = BackendResult(ComputeStatus.not_converged, {**stuck, "from_cache": True}, gpu_seconds=0.0)
             else:
                 outcome = self._run(tier, inputs, settings)
-                if outcome.status == ComputeStatus.ok:
-                    self.cache.put(key, outcome.result, tier=tier.value, settings=settings)
+                if outcome.status in (ComputeStatus.ok, ComputeStatus.not_converged):
+                    self.cache.put(key, outcome.result, tier=tier.value, settings=settings,
+                                   status=outcome.status.value)
 
         return self._log(
             item_id=item.item_id,

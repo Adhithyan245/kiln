@@ -114,9 +114,11 @@ def test_a_second_process_cannot_run_the_same_run_at_once(tmp_path: Path) -> Non
 
 
 @pytest.mark.parametrize("condition", ["C1", "C2", "C3", "C4"])
-def test_real_agents_and_the_frozen_scorer_predict_through_the_runner(tmp_path: Path, condition: str) -> None:
+def test_real_agents_and_the_frozen_scorer_predict_through_the_runner(tmp_path: Path, condition: str,
+                                                                      monkeypatch) -> None:
     from kiln.runners.conditions import real_components
 
+    monkeypatch.setenv("KILN_COMPUTE_BACKEND", "local")
     real = real_components({"energy_margin_ev_per_atom": 0.05, "disagreement_threshold_ev_per_atom": 0.05})
     components = Components(compute=lambda run_dir, c: stubs.StubCompute(run_dir, c.tier_prices),  # no GPU in tests
                             specialists=real.specialists, tool_values=real.tool_values, flags=real.flags,
@@ -235,13 +237,55 @@ def test_a_failing_item_is_logged_and_the_run_continues_then_stops_on_a_streak(t
         go(tmp_path / "streak", "C4", items=many, components=one_bad)
 
 
-def test_real_components_wire_annamayyas_agents_with_the_frozen_thresholds() -> None:
+def test_real_components_wire_annamayyas_agents_with_the_frozen_thresholds(monkeypatch) -> None:
     from kiln.runners.conditions import real_components
 
     from kiln.scoring.score import frozen_engine
 
+    monkeypatch.setenv("KILN_COMPUTE_BACKEND", "local")
     comp = real_components({"energy_margin_ev_per_atom": 0.05, "disagreement_threshold_ev_per_atom": 0.05})
     assert comp.stub_parts == () and not comp.stubs and comp.scorer is frozen_engine
+    assert comp.compute_backend == "local"
     agents = comp.specialists(object(), cfg("C4"))
     assert sorted(a.name for a in agents) == ["kinetics", "precursor", "thermo"]
     assert all(getattr(a, "energy_margin", 0.05) == 0.05 for a in agents)
+
+
+@pytest.mark.parametrize("value", [None, "stub", "fake"])
+def test_real_runs_refuse_a_stub_or_unset_compute_backend(monkeypatch, value) -> None:
+    from kiln.runners.conditions import real_components
+
+    if value is None:
+        monkeypatch.delenv("KILN_COMPUTE_BACKEND", raising=False)
+    else:
+        monkeypatch.setenv("KILN_COMPUTE_BACKEND", value)
+    with pytest.raises(SystemExit, match="KILN_COMPUTE_BACKEND"):
+        real_components({"energy_margin_ev_per_atom": 0.05, "disagreement_threshold_ev_per_atom": 0.05})
+
+
+def test_config_records_the_compute_backend(tmp_path: Path) -> None:
+    config = json.loads((go(tmp_path, "C4") / "config.json").read_text())
+    assert config["compute_backend"] == "stub" and "compute" in config["stub_parts"]
+
+
+def _req(tier, status, result, gpu=0.0, device="cuda"):
+    from kiln.schemas import ComputeRequest
+
+    return ComputeRequest(request_id="c:compute:1", run_id="c", item_id="T-0", agent="thermo", tier=tier, reason="r",
+                          inputs={}, settings={"device": device}, cache_key="k", status=status, result=result,
+                          gpu_seconds=gpu)
+
+
+def test_canary_passes_only_for_real_lookups_and_a_real_mlip() -> None:
+    from kiln.runners.canary import check
+
+    good_lookup = _req("cached_lookup", "ok", {"source": "materials_project", "dE_ev_per_atom": -0.1})
+    good_single = _req("single_point", "ok", {"model": "medium-mpa-0", "dE_ev_per_atom": -0.1}, gpu=5.0)
+    assert check(good_lookup, good_single) == []
+    assert check(good_lookup, _req("single_point", "cached", {"model": "medium-mpa-0"})) == []   # warm cache is fine
+    stub_lookup = _req("cached_lookup", "ok", {"model": "stub", "dE_ev_per_atom": -0.1})
+    stub_single = _req("single_point", "ok", {"model": "stub", "dE_ev_per_atom": -0.1})
+    problems = check(stub_lookup, stub_single)                                                 # the Night 2 GB10 case
+    assert any("materials_project" in p for p in problems) and any("not stub" in p for p in problems)
+    assert check(good_lookup, _req("single_point", "ok", {"model": "medium-mpa-0"}, gpu=0.0))  # 0 GPU-s on cuda
+    assert check(good_lookup, _req("single_point", "failed", {"error": "boom"}))

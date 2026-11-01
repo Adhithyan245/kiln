@@ -26,10 +26,26 @@ class PlanError(Exception):
 class Caps(BaseModel):
     max_tokens: int | None = None
     max_usd: float | None = None
+    # GPU-seconds are summed over every process, so parallel workers spend them concurrently. Give either a
+    # night total (max_gpu_hours) or a per-worker allowance times the number of parallel workers.
     max_gpu_hours: float | None = None
+    max_gpu_hours_per_worker: float | None = None
+    workers: int = Field(default=1, ge=1)
+
+    @property
+    def gpu_hours_cap(self) -> float | None:
+        if self.max_gpu_hours is not None:
+            return self.max_gpu_hours
+        return None if self.max_gpu_hours_per_worker is None else self.max_gpu_hours_per_worker * self.workers
 
     def complete(self) -> bool:
-        return None not in (self.max_tokens, self.max_usd, self.max_gpu_hours)
+        return None not in (self.max_tokens, self.max_usd, self.gpu_hours_cap)
+
+    @model_validator(mode="after")
+    def _one_gpu_cap(self) -> Caps:
+        if self.max_gpu_hours is not None and self.max_gpu_hours_per_worker is not None:
+            raise ValueError("give max_gpu_hours or max_gpu_hours_per_worker, not both")
+        return self
 
 
 class Retry(BaseModel):

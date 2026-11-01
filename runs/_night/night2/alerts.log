@@ -1,0 +1,10 @@
+2026-11-01T12:57:47+00:00 [night2] night 'night2' starting
+2026-11-01T13:27:47+00:00 [night2] heartbeat: {'done': 1} pending=9; tokens 715243/12000000, usd 1.95/30.0, gpu_h 0.65/8.0
+2026-11-01T13:57:48+00:00 [night2] heartbeat: {'done': 1} pending=9; tokens 1237729/12000000, usd 3.43/30.0, gpu_h 1.34/8.0
+2026-11-01T14:27:48+00:00 [night2] heartbeat: {'done': 1} pending=9; tokens 1880906/12000000, usd 5.22/30.0, gpu_h 2.61/8.0
+2026-11-01T14:57:48+00:00 [night2] heartbeat: {'done': 1} pending=9; tokens 2732896/12000000, usd 7.58/30.0, gpu_h 3.94/8.0
+2026-11-01T15:27:49+00:00 [night2] heartbeat: {'done': 1} pending=9; tokens 3401773/12000000, usd 9.45/30.0, gpu_h 5.97/8.0
+2026-11-01T15:45:58+00:00 [night2] stopping: cap: GPU-hour cap reached (8.15 >= 8.0)
+2026-11-01T15:50:58+00:00 [night2] run_conditions: interrupted (terminated after stop grace period); will rerun on resume
+2026-11-01T15:50:59+00:00 [night2] stop_brev: skipped, env not set: ['BREV_INSTANCE']
+2026-11-01T15:50:59+00:00 [night2] night 'night2' finished: NOT OK; failed=[] stopped='cap: GPU-hour cap reached (8.15 >= 8.0)'

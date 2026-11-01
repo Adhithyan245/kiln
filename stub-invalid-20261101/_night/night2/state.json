@@ -1,0 +1,16 @@
+{
+  "plan": "night2",
+  "stopped": null,
+  "steps": {
+    "preflight": "done",
+    "run_conditions": "done",
+    "finalize": "done",
+    "manifest": "done",
+    "post_hash": "done",
+    "push": "failed",
+    "fetch_labels": "skipped:deps ['push']",
+    "score": "skipped:deps ['fetch_labels']",
+    "figures": "skipped:deps ['score']",
+    "stop_brev": "skipped:env ['BREV_INSTANCE']"
+  }
+}
