@@ -36,5 +36,7 @@ def test_app_escapes_output_and_sorts_flags(tmp_path, monkeypatch):
             {"item_id": "<script>", "needs_review": True}]
     (out / "predictions.jsonl").write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
     page = module.render()
-    assert page.index("&lt;script&gt;") < page.index("ordinary")
-    assert "<script>" not in page
+    payload = page.split('<script type="application/json" id="kiln-data">', 1)[1].split('</script>', 1)[0]
+    assert "<script>" not in payload
+    assert "\\u003cscript\\u003e" in payload
+    assert [row["item_id"] for row in json.loads(payload)] == ["<script>", "ordinary"]
