@@ -117,3 +117,11 @@ A GB10 rerun with real compute started on 2026-11-01 at 12:57:47Z.
 - **Why this cannot affect the live run:** labels never go to the VM, and the agents never see scores. Scoring the copy cannot change what the live run predicts.
 - **Who made the change:** Hemanath.
 - **Decision timing:** decided at 16:05 UTC on 2026-11-01 and pushed before the copy was taken. The H100 run was blind: no predictions unblinded, nothing scored, labels not loaded.
+
+### 2026-11-01: H100 GPU-hour cap raised a third time, from 20.0 to 26.0, so the full run can finish
+
+- **What changed:** the live H100 run's GPU-hour safety cap, from 20.0 to 26.0, in `~/kiln-h100/night2-h100-resume26.toml` (SHA-256 `e96802d6d361e5adc9f27bf1d9f4240799ace88642cf75d3df1ba6834f812805`). That is the only line that differs from `night2-h100-resume.toml`. The run is not stopped early. A watcher on the VM waits for the 20.0-cap run to exit and resumes it in the same shell with the 26.0 plan, but only if the last alert names the GPU-hour cap.
+- **Why:** at 16:24 UTC the run had 3,962 of 4,152 predictions and 18.04 GPU-hours spent. At the recent rate it would reach 20.0 around 16:53 UTC, a few minutes before finishing. 26.0 leaves room for the rest and for the stop grace period. Tokens and USD stay inside their unchanged caps.
+- **Effect on results:** none on the copy scored at 16:15 UTC (previous entry), which is fixed by its posted hash. The full run gets its own manifest, hash post and score, reported in its own table.
+- **Who made the change:** Hemanath.
+- **Decision timing:** decided at 16:25 UTC on 2026-11-01. The full run's predictions are not yet hashed or scored.
