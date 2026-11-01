@@ -1,0 +1,106 @@
+{
+ "PG_0107": {
+  "tool_calls": 5,
+  "tokens_in": 625,
+  "tokens_out": 744,
+  "compute_units": 0.1,
+  "gpu_seconds": 0.0,
+  "usd": 0.0032587500000000004
+ },
+ "PG_0113": {
+  "tool_calls": 7,
+  "tokens_in": 931,
+  "tokens_out": 773,
+  "compute_units": 31.1,
+  "gpu_seconds": 4.458178147993749,
+  "usd": 0.0035970000000000004
+ },
+ "PG_0117": {
+  "tool_calls": 5,
+  "tokens_in": 609,
+  "tokens_out": 739,
+  "compute_units": 0.1,
+  "gpu_seconds": 0.0,
+  "usd": 0.003228
+ },
+ "PG_0122": {
+  "tool_calls": 5,
+  "tokens_in": 628,
+  "tokens_out": 683,
+  "compute_units": 0.1,
+  "gpu_seconds": 0.0,
+  "usd": 0.00303225
+ },
+ "PG_0135": {
+  "tool_calls": 5,
+  "tokens_in": 628,
+  "tokens_out": 754,
+  "compute_units": 0.1,
+  "gpu_seconds": 0.0,
+  "usd": 0.0032985
+ },
+ "PG_0139": {
+  "tool_calls": 7,
+  "tokens_in": 851,
+  "tokens_out": 844,
+  "compute_units": 31.1,
+  "gpu_seconds": 0.0,
+  "usd": 0.00380325
+ },
+ "PG_0143": {
+  "tool_calls": 7,
+  "tokens_in": 845,
+  "tokens_out": 683,
+  "compute_units": 31.1,
+  "gpu_seconds": 0.9019969699875219,
+  "usd": 0.003195
+ },
+ "PG_0146": {
+  "tool_calls": 7,
+  "tokens_in": 851,
+  "tokens_out": 849,
+  "compute_units": 31.1,
+  "gpu_seconds": 0.0,
+  "usd": 0.003822
+ },
+ "PG_0149": {
+  "tool_calls": 7,
+  "tokens_in": 853,
+  "tokens_out": 787,
+  "compute_units": 31.1,
+  "gpu_seconds": 0.0,
+  "usd": 0.003591
+ },
+ "PG_0207": {
+  "tool_calls": 7,
+  "tokens_in": 904,
+  "tokens_out": 723,
+  "compute_units": 31.1,
+  "gpu_seconds": 312.10320610199415,
+  "usd": 0.0033892500000000003
+ },
+ "PG_0213": {
+  "tool_calls": 7,
+  "tokens_in": 905,
+  "tokens_out": 740,
+  "compute_units": 31.1,
+  "gpu_seconds": 0.0,
+  "usd": 0.0034537500000000002
+ },
+ "PG_0217": {
+  "tool_calls": 7,
+  "tokens_in": 907,
+  "tokens_out": 823,
+  "compute_units": 31.1,
+  "gpu_seconds": 361.889492864997,
+  "usd": 0.0037664999999999994
+ },
+ "PG_0222": {
+  "tool_calls": 7,
+  "tokens_in": 905,
+  "tokens_out": 912,
+  "compute_units": 31.1,
+  "gpu_seconds": 1.2547557500074618,
+  "usd": 0.00409875
+ }
+}
