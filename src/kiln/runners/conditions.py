@@ -253,16 +253,21 @@ def run_item(cfg: RunConfig, run_dir: Path, item: Item, compute: Compute, compon
 # ---------- one run ----------
 
 def run(cfg: RunConfig, items: Sequence[Item], components: Components, runs_dir: Path = Path("runs"),
-        progress: Callable[[str], None] = print) -> Path:
+        progress: Callable[[str], None] = print, *, wait_for_lock: bool = True) -> Path:
     run_dir = Path(runs_dir) / cfg.run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     # One process per run. The night runner starts steps in their own session, so a killed runner
-    # can leave this process alive; a restarted copy must not run the same items alongside it.
+    # can leave this process alive; a restarted copy waits for it instead of running the same items
+    # alongside it (the OS frees the lock when that process exits), then resumes what is left.
     lock = FileLock(str(run_dir / ".run.lock"))
     try:
         lock.acquire(timeout=0)
     except Timeout:
-        raise SystemExit(f"{cfg.run_id} is already running in another process; retry when it finishes") from None
+        if not wait_for_lock:
+            raise SystemExit(f"{cfg.run_id} is already running in another process") from None
+        print(f"{cfg.run_id} is held by another process (an earlier runner?); waiting for it to finish",
+              file=sys.stderr, flush=True)
+        lock.acquire()
     try:
         return _run_locked(cfg, items, components, run_dir, progress)
     finally:

@@ -107,7 +107,7 @@ def test_a_second_process_cannot_run_the_same_run_at_once(tmp_path: Path) -> Non
     run_dir.mkdir(parents=True)
     with FileLock(str(run_dir / ".run.lock")):        # an orphaned earlier process still holds the run
         with pytest.raises(SystemExit, match="already running"):
-            go(tmp_path, "C4")
+            run(cfg("C4"), ITEMS, stub_components(), tmp_path, progress=lambda _: None, wait_for_lock=False)
     assert not (run_dir / "predictions.jsonl").exists()
     go(tmp_path, "C4")                                 # once it has gone, the run proceeds normally
     assert len(jsonl(run_dir / "predictions.jsonl")) == 3
