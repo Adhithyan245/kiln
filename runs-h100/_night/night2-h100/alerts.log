@@ -1,0 +1,26 @@
+2026-11-01T06:12:13+00:00 [night2-h100] night 'night2-h100' starting
+2026-11-01T06:42:13+00:00 [night2-h100] heartbeat: {'done': 1} pending=7; tokens 703061/12000000, usd 1.90/30.0, gpu_h 0.42/8.0
+2026-11-01T07:12:14+00:00 [night2-h100] heartbeat: {'done': 1} pending=7; tokens 1446962/12000000, usd 3.93/30.0, gpu_h 1.41/8.0
+2026-11-01T07:42:14+00:00 [night2-h100] heartbeat: {'done': 1} pending=7; tokens 2563271/12000000, usd 6.90/30.0, gpu_h 3.18/8.0
+2026-11-01T08:12:14+00:00 [night2-h100] heartbeat: {'done': 1} pending=7; tokens 3894117/12000000, usd 10.39/30.0, gpu_h 4.49/8.0
+2026-11-01T08:42:15+00:00 [night2-h100] heartbeat: {'done': 1} pending=7; tokens 5113376/12000000, usd 13.59/30.0, gpu_h 5.40/8.0
+2026-11-01T09:12:15+00:00 [night2-h100] heartbeat: {'done': 1} pending=7; tokens 5719163/12000000, usd 15.09/30.0, gpu_h 7.05/8.0
+2026-11-01T09:29:25+00:00 [night2-h100] stopping: cap: GPU-hour cap reached (8.01 >= 8.0)
+2026-11-01T09:34:26+00:00 [night2-h100] run_conditions: interrupted (terminated after stop grace period); will rerun on resume
+2026-11-01T09:34:26+00:00 [night2-h100] stop_brev: skipped, env not set: ['BREV_INSTANCE']
+2026-11-01T09:34:26+00:00 [night2-h100] night 'night2-h100' finished: NOT OK; failed=[] stopped='cap: GPU-hour cap reached (8.01 >= 8.0)'
+2026-11-01T11:54:39+00:00 [night2-h100] night 'night2-h100' starting
+2026-11-01T12:24:39+00:00 [night2-h100] heartbeat: {'resumed': 1} pending=7; tokens 6389899/12000000, usd 16.74/30.0, gpu_h 10.10/14.0
+2026-11-01T12:54:40+00:00 [night2-h100] heartbeat: {'resumed': 1} pending=7; tokens 6828829/12000000, usd 17.79/30.0, gpu_h 11.97/14.0
+2026-11-01T13:24:40+00:00 [night2-h100] heartbeat: {'resumed': 1} pending=7; tokens 7302496/12000000, usd 18.97/30.0, gpu_h 13.80/14.0
+2026-11-01T13:29:44+00:00 [night2-h100] stopping: cap: GPU-hour cap reached (14.04 >= 14.0)
+2026-11-01T13:34:44+00:00 [night2-h100] run_conditions: interrupted (terminated after stop grace period); will rerun on resume
+2026-11-01T13:34:45+00:00 [night2-h100] stop_brev: skipped, env not set: ['BREV_INSTANCE']
+2026-11-01T13:34:45+00:00 [night2-h100] night 'night2-h100' finished: NOT OK; failed=[] stopped='cap: GPU-hour cap reached (14.04 >= 14.0)'
+2026-11-01T15:36:30+00:00 [night2-h100] night 'night2-h100' starting
+2026-11-01T16:06:30+00:00 [night2-h100] heartbeat: {'resumed': 1} pending=7; tokens 7514891/12000000, usd 19.49/30.0, gpu_h 16.87/20.0
+2026-11-01T16:36:31+00:00 [night2-h100] heartbeat: {'resumed': 1} pending=7; tokens 7852354/12000000, usd 20.29/30.0, gpu_h 18.51/20.0
+2026-11-01T16:59:01+00:00 [night2-h100] fetch_labels: FAILED after 1 attempts (exit code 3)
+2026-11-01T16:59:02+00:00 [night2-h100] stopping: fetch_labels failed and is marked on_fail=stop
+2026-11-01T16:59:02+00:00 [night2-h100] stop_brev: skipped, env not set: ['BREV_INSTANCE']
+2026-11-01T16:59:02+00:00 [night2-h100] night 'night2-h100' finished: NOT OK; failed=['fetch_labels'] stopped='fetch_labels failed and is marked on_fail=stop'

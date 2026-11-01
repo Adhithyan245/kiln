@@ -1,0 +1,14 @@
+{
+  "plan": "night2-h100",
+  "stopped": "fetch_labels failed and is marked on_fail=stop",
+  "steps": {
+    "preflight": "resumed",
+    "run_conditions": "done",
+    "finalize": "done",
+    "manifest": "done",
+    "post_hash": "done",
+    "push": "done",
+    "fetch_labels": "failed",
+    "stop_brev": "skipped:env ['BREV_INSTANCE']"
+  }
+}
