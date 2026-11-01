@@ -9,7 +9,7 @@ from pymatgen.core import Composition
 
 from kiln.schemas import Artifact, ComputeRequest, ComputeStatus, Item, ReviewFlag, ReviewReason, VerifierStatus
 
-# PROPOSAL (not approved): an unknown decomposition temperature matters only for a precursor that can
+# Approved Nov 1 by Hemanath and Adhi (plan-changes row 29): an unknown decomposition temperature matters only for a precursor that can
 # break down on heating. Anything with H, C or N can (carbonates, hydroxides, oxalates, hydrates, ammonium
 # and acid phosphates); so can these oxides, which lose oxygen to a lower oxide. Other oxides are not flagged.
 OXYGEN_RELEASING_OXIDES = frozenset({"MnO2", "Mn2O3", "Fe2O3", "Co3O4", "CuO", "BaO2", "Ag2O", "PbO2"})
