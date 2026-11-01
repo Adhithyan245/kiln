@@ -97,13 +97,18 @@ class ComputeClient:
 
         budget.charge_compute(units)
 
-        cached = self.cache.get(key)
-        if cached is not None:
-            outcome = BackendResult(ComputeStatus.cached, cached, gpu_seconds=0.0)
-        else:
-            outcome = self._run(tier, inputs, settings)
-            if outcome.status == ComputeStatus.ok:
-                self.cache.put(key, outcome.result, tier=tier.value, settings=settings)
+        # One calculation per key at a time across processes (--parallel runs): a second request for
+        # the same key waits, then is served from the cache instead of computing it again.
+        lock_dir = Path(self.cache.root) / ".locks"
+        lock_dir.mkdir(parents=True, exist_ok=True)
+        with FileLock(str(lock_dir / f"{key}.lock")):
+            cached = self.cache.get(key)
+            if cached is not None:
+                outcome = BackendResult(ComputeStatus.cached, cached, gpu_seconds=0.0)
+            else:
+                outcome = self._run(tier, inputs, settings)
+                if outcome.status == ComputeStatus.ok:
+                    self.cache.put(key, outcome.result, tier=tier.value, settings=settings)
 
         return self._log(
             item_id=item.item_id,

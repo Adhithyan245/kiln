@@ -76,6 +76,9 @@ def test_night2_pushes_before_the_label_steps_and_stops_there() -> None:
     assert plan.step("fetch_labels").on_fail == plan.step("score").on_fail == "stop"
     cmd = plan.step("run_conditions").cmd
     assert "--items-file" in cmd and "--frozen" in cmd and "--allow-no-remote" in plan.step("push").cmd
+    assert cmd[cmd.index("--parallel") + 1] == "12"
+    assert order.index("run_conditions") < order.index("finalize") < order.index("manifest")
+    assert plan.step("manifest").depends_on == ["finalize"]
 
 
 def test_on_fail_stop_alerts_and_stops_the_night(tmp_path: Path) -> None:

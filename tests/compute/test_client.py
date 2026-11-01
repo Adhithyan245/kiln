@@ -61,6 +61,31 @@ def test_a_change_to_the_tier_code_invalidates_the_cache(paths) -> None:
     assert "_code_version" not in again.settings           # the backend sees the settings unchanged
 
 
+def test_concurrent_requests_for_one_calculation_compute_it_once(paths) -> None:
+    import threading
+    import time as _time
+
+    run_dir, cache_dir = paths
+    calls = []
+
+    class Slow(StubBackend):
+        def run(self, tier, inputs, settings):
+            calls.append(1)
+            _time.sleep(0.3)
+            return super().run(tier, inputs, settings)
+
+    client = make_client(run_dir, cache_dir, backend=Slow())
+    results = []
+    threads = [threading.Thread(target=lambda: results.append(ask(client, Budget(make_config())))) for _ in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(calls) == 1
+    assert sorted(r.status.value for r in results) == ["cached", "cached", "ok"]
+    assert all(r.compute_units == 1.0 for r in results)          # every request is still charged
+
+
 def test_code_version_follows_the_tier_source() -> None:
     assert client_module.code_version() == client_module.code_version()
     assert len(client_module.code_version()) == 16

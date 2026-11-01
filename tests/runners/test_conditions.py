@@ -187,6 +187,34 @@ def test_parallel_runs_each_condition_seed_in_its_own_process(tmp_path: Path) ->
     assert all(len(jsonl(p)) == 2 for p in runs.glob("*/predictions.jsonl"))
 
 
+def test_finalize_scores_crashed_and_unreached_items_on_empty_evidence(tmp_path: Path) -> None:
+    from kiln.runners.finalize import finalize_run
+
+    base = stub_components()
+    one_bad = Components(compute=base.compute, specialists=lambda compute, c: [Crasher()], tool_values=base.tool_values,
+                         flags=base.flags, scorer=base.scorer, stub_parts=base.stub_parts)
+    run_dir = go(tmp_path, "C4", items=ITEMS[:2], components=one_bad)       # T-0 crashes, T-1 predicts
+    assert finalize_run(run_dir, ITEMS) == 2                                  # T-0 crashed, T-2 never reached
+    preds = {p["item_id"]: p for p in jsonl(run_dir / "predictions.jsonl")}
+    assert sorted(preds) == ["T-0", "T-1", "T-2"]
+    assert "crashed" in preds["T-0"]["review_flags"][-1]["detail"] and preds["T-0"]["evidence"] == []
+    assert "never reached" in preds["T-2"]["review_flags"][-1]["detail"]
+    assert [r["item_id"] for r in jsonl(run_dir / "finalized_items.jsonl")] == ["T-0", "T-2"]
+    assert finalize_run(run_dir, ITEMS) == 0                                  # idempotent
+
+
+def test_finalize_cost_matches_the_items_logged_requests(tmp_path: Path) -> None:
+    from kiln.runners.finalize import finalize_run
+
+    run_dir = go(tmp_path, "C4", items=ITEMS)
+    lines = (run_dir / "predictions.jsonl").read_text().splitlines()
+    (run_dir / "predictions.jsonl").write_text("\n".join(lines[:-1]) + "\n")  # T-2 computed, then lost
+    assert finalize_run(run_dir, ITEMS) == 1
+    logged = sum(r["compute_units"] for r in jsonl(run_dir / "compute_requests.jsonl") if r["item_id"] == "T-2")
+    t2 = [p for p in jsonl(run_dir / "predictions.jsonl") if p["item_id"] == "T-2"][-1]
+    assert logged > 0 and t2["cost"]["compute_units"] == pytest.approx(logged)
+
+
 class Crasher(Agent):
     name = "thermo"
 
