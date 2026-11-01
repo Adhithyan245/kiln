@@ -30,3 +30,8 @@ Built at the ScienceClaw hackathon (MIT Media Lab, Oct 30–Nov 1, 2026) by Adhi
 - Branching and protection: `docs/github-setup.md`
 
 Run instructions, results and the demo link are added before the repo goes public on Sunday.
+
+## Data and license
+
+- **Code:** MIT License (`LICENSE`).
+- **Data:** this project evaluates on *The Precursor Genome: A Pairwise Reaction Dataset for Solid-State Synthesis* (Walters, McDermott et al., [arXiv:2607.09903](https://arxiv.org/abs/2607.09903), 2026; data on [Zenodo](https://zenodo.org/records/21285546) and [GitHub](https://github.com/lauren-walters/precursor-genome)). The dataset is not redistributed here and stays under its own terms; experimental outcome labels never enter this repository. Thermochemistry comes from the [Materials Project](https://materialsproject.org); precursor melting points and decomposition temperatures in `data/precursor_props.csv` carry per-row source citations.
