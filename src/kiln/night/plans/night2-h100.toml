@@ -21,7 +21,10 @@ stop_grace_s = 300
 # Same as night2.toml: ~9.3 M tokens and ~$23 expected for 346 items x 4 conditions x 3 seeds.
 max_tokens = 12000000
 max_usd = 30.0
-max_gpu_hours = 8.0
+# GPU-seconds are summed over the 12 parallel runs. The Nov 1 run hit a flat 8 GPU-h at 2,953 of 4,152
+# predictions (~11 GPU-h for the whole night) and was raised to 14 (amendments); 1.2 per worker is 14.4.
+max_gpu_hours_per_worker = 1.2
+workers = 12
 
 [retry]
 base_s = 30

@@ -18,7 +18,10 @@ stop_grace_s = 300
 # GPU: the proposal expects ~4.3 GPU-h with the cache against 7.7 h usable (protocol/prices_proposal.json).
 max_tokens = 12000000
 max_usd = 30.0
-max_gpu_hours = 8.0
+# GPU-seconds are summed over the 12 parallel runs, so the cap is per worker. Real compute (the H100 run,
+# Nov 1) needed ~11 GPU-h summed for the whole night; a flat 8 stopped it early. 1.2 per worker is 14.4.
+max_gpu_hours_per_worker = 1.2
+workers = 12
 
 [retry]
 base_s = 30

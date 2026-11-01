@@ -32,7 +32,7 @@ class Spend:
 
     def summary(self, caps: Caps) -> str:
         return (f"tokens {self.tokens}/{caps.max_tokens}, usd {self.usd:.2f}/{caps.max_usd}, "
-                f"gpu_h {self.gpu_hours:.2f}/{caps.max_gpu_hours}")
+                f"gpu_h {self.gpu_hours:.2f}/{caps.gpu_hours_cap}")
 
 
 def _costs(data: Any) -> list[dict[str, Any]]:
@@ -78,6 +78,6 @@ def breach(spend: Spend, caps: Caps) -> str | None:
         return f"token cap reached ({spend.tokens} >= {caps.max_tokens})"
     if spend.usd >= caps.max_usd:  # type: ignore[operator]
         return f"USD cap reached ({spend.usd:.2f} >= {caps.max_usd})"
-    if spend.gpu_hours >= caps.max_gpu_hours:  # type: ignore[operator]
-        return f"GPU-hour cap reached ({spend.gpu_hours:.2f} >= {caps.max_gpu_hours})"
+    if spend.gpu_hours >= caps.gpu_hours_cap:  # type: ignore[operator]
+        return f"GPU-hour cap reached ({spend.gpu_hours:.2f} >= {caps.gpu_hours_cap}, summed over workers)"
     return None

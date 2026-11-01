@@ -81,6 +81,22 @@ def test_night2_pushes_before_the_label_steps_and_stops_there() -> None:
     assert plan.step("manifest").depends_on == ["finalize"]
 
 
+def test_gpu_cap_can_be_given_per_worker() -> None:
+    from kiln.night.plan import Caps
+    from kiln.night.spend import Spend, breach
+
+    caps = Caps(max_tokens=10, max_usd=1.0, max_gpu_hours_per_worker=1.2, workers=12)
+    assert caps.complete() and caps.gpu_hours_cap == pytest.approx(14.4)
+    assert breach(Spend(gpu_seconds=10 * 3600), caps) is None              # 10 summed GPU-h is fine for 12 workers
+    assert "GPU-hour cap" in breach(Spend(gpu_seconds=15 * 3600), caps)
+    assert Caps(max_tokens=1, max_usd=1.0, max_gpu_hours=8.0).gpu_hours_cap == 8.0
+    with pytest.raises(ValueError):
+        Caps(max_tokens=1, max_usd=1.0, max_gpu_hours=8.0, max_gpu_hours_per_worker=1.0)
+    for name in ("night2.toml", "night2-h100.toml"):
+        plan = load_plan(PLANS / name)
+        assert plan.caps.workers == 12 and plan.caps.gpu_hours_cap == pytest.approx(14.4)
+
+
 @pytest.mark.parametrize("name", ["night2.toml", "night2-h100.toml"])
 def test_night2_plans_run_the_canary_and_require_a_backend_before_any_prediction(name: str) -> None:
     plan = load_plan(PLANS / name)
