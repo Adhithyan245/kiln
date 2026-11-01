@@ -42,6 +42,23 @@ Development pairs only: no labels, no held-out pair (protocol §11 rule 6). Mate
 - **T_disagree 0.05 recommended (kept).** \|ΔE_mlip − ΔE_mp\| on the 20 profiled pairs: at most 0.035 eV/atom for single points (0.038 relaxed); 18 of 20 at most 0.017. So 0.05 fires only on a clear disagreement and does not flood the `conflict` review flag. 20 pairs is too few to justify a finer value.
 - **Still Annamayya's call:** whether ΔE_rxn = 0 counts as borderline. Counting it is defensible (a near-hull competitor could become stable) but adds 38 percentage points of escalations.
 
+### OPEN-07 decision as proposed (Sat Oct 31, late evening): 0 < \|ΔE_rxn\| ≤ 0.05; ΔE_rxn = 0 alone never recommends escalation
+
+Checked on development data before the freeze (no labels, nothing held-out):
+
+| Development pairs (635) | Count |
+|---|---|
+| (a) 0 < \|ΔE_rxn\| ≤ 0.05 | 253 (40%) |
+| (b) nearest off-hull competitor ≤ 0.1 eV/atom (`competitor_e_hull_ev_per_atom`) | 159 (25%); 59 of them have ΔE_rxn = 0 |
+| **Escalation recommended, (a) or (b)** | **360 (57%)** |
+| ΔE_rxn = 0 (never recommended by (a)) | 242 (38%) |
+
+**Does escalation change results?** The frozen scoring rules' category boundary is ΔE_rxn ≥ −0.05 → `unreacted` (`no_driving_force`), so a better energy changes a category only if it crosses −0.05; `p_react` (weight −20 per eV/atom) moves continuously either way. On the 20 profiled development pairs (`runs/profile-promaxgb10-99ea-s0`, single points and relaxations), single points moved ΔE_rxn by at most 0.035 eV/atom, and **2 pairs crossed −0.05**:
+- PG_2940: −0.046 → −0.053 (single point), −0.055 (relaxation): `unreacted` → driving force. Escalated under (a).
+- PG_1048: −0.052 → −0.035: driving force → `unreacted`. **Not** escalated under (a), because \|ΔE_rxn\| = 0.052 > 0.05.
+
+Implication for the record: the window 0 < \|ΔE_rxn\| ≤ 0.05 sits entirely on the `unreacted` side of the scoring boundary. 49 development pairs (8%) lie just past it (−0.07 ≤ ΔE_rxn < −0.05), where a second energy can flip the category but (a) doesn't recommend one; pairs near −0.01 are escalated although a change of this size can't flip their category. A window centred on the boundary, \|ΔE_rxn + 0.05\| ≤ 0.02, recommends 116 pairs (18%; 237 or 37% with (b)) and would have caught both flips. Recorded for the decision owners; nothing here changes the decision. The relaxations in that profiling run predate the gas-molecule fix and are `not_converged`; their energies are shown for comparison only, and 20 pairs is a small sample.
+
 ## What not to claim
 
 - **Not** "within k_BT, thermal fluctuations decide." At 700–1,200 °C, k_BT is about 84–127 meV per particle, and it is not directly comparable with E_hull; finite-temperature stability depends on entropy (TΔS) and kinetics.
