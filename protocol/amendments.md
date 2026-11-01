@@ -16,7 +16,10 @@ Gate P happened on 2026-11-01. `protocol/protocol.md` is frozen at the Gate P co
 
 Record written on 2026-11-01 from the values relayed by the orchestrator. When it was written, the Gate P commit, its commit time, its parents (`de0e33f` and `3ecfb37`), the digest (recomputed with the P3 command) and the P2 check were rechecked against `dev` at `c283468`. The Discord message was not fetched again for this record. The webhook URL is a secret and is not written here or anywhere in the repo (`AGENTS.md` rule 4).
 
-## Gate H record (Night 2 GB10 primary run)
+## Gate H record (Night 2 GB10 primary run - DECLARED INVALID)
+
+> [!WARNING]
+> **Superseded and declared invalid (2026-11-01):** As recorded in the Amendments section below, the GB10 run was discovered to have executed with the stub compute backend (`KILN_COMPUTE_BACKEND=stub`), producing mock energies (`model: stub`). This run is invalid and discarded. The H100 replication run is designated as the sole valid experimental result.
 
 Gate H verification for the primary run happened on 2026-11-01. The Night 2 GB10 run produced 4,152 predictions across 12 runs (C1–C4 × 3 seeds × 346 held-out items), run at code `040f65d129 0d9ebadfd6 4ef33e6528 572bff923b` (`040f65d`), containing Gate P commit `c283468633 4c6bc768fd 0654a220b9 0df8b4985c`. Results, manifest and receipt were committed on `dev` at `e4854073b4 54b8ce96ab ae42e2813d 0fdaef7458` (`e4854073`). 5 items were scored on empty evidence after Gemini 503 errors (OPEN-23): C2-s0, C2-s1, C3-s0, C3-s2, C4-s0, one each. Full SHAs are written in blocks because `tests/protocol/test_protocol.py` rejects unbroken 40- to 64-character hex strings in this file. Join the blocks to compare.
 
@@ -56,4 +59,22 @@ The code items in `protocol.md` §17 table 2 (OPEN-23, OPEN-24, and the `evaluat
 
 ## Amendments
 
-None. Each amendment after Gate P gets a dated entry: what changed, why, who made it, and whether it was decided before or after unblinding. Anything decided after unblinding is labeled post hoc.
+### 2026-11-01: GB10 primary run invalidation due to stub backend defect; H100 replication adopted as experimental result
+
+- **What changed:**
+  1. The Night 2 GB10 primary run (`runs/`) is declared **invalid** and discarded.
+  2. The Night 2 H100 replication run (`runs-h100/`) is adopted as the sole valid experimental evaluation result.
+  3. The H100 plan GPU-hour safety cap was increased mid-run from 8.0 to 14.0 GPU-hours.
+- **Why (GB10 defect discovery):**
+  Inspection of the compute logs (`runs/*/compute_requests.jsonl` on `dev`) revealed that `KILN_COMPUTE_BACKEND` had defaulted to `"stub"` on the GB10 host machine and was never set to `"local"`. As a result, every single-point and relaxation compute request on the GB10 returned fake energies with `result.model: "stub"` and recorded `0.0` GPU-seconds. This defect was undetected by preflight checks because `stub_parts` only monitors LLM stand-in agents and the rule scorer, not the underlying MLIP compute backend. Crucially, this defect was discovered **from the compute logs and hardware telemetry (0.0 GPU-seconds recorded), not from evaluation scores or label inspection**.
+- **H100 run verification:**
+  Telemetry and compute logs from the H100 instance (`runs-h100/`) were inspected and confirmed genuine:
+  - `KILN_COMPUTE_BACKEND=local` was confirmed active in the running process environment.
+  - All `single_point` and `bounded_relaxation` tiers log `result.model: "medium-mpa-0"` (0 stub entries across all 12 runs).
+  - All MLIP tiers use `result.backend: "nvalchemi+ase"`.
+  - Realistic non-zero GPU execution times are logged (e.g. 28 s for single point, up to 345 s for relaxations).
+  - `cached_lookup` tiers verify as `source: "materials_project"`.
+- **H100 safety cap adjustment:**
+  The H100 run paused at 09:29 UTC after reaching 2,953 / 4,152 predictions when cumulative GPU time across 12 concurrent workers reached the 8.0 GPU-hour cap. The 8.0-hour cap was originally copied from the GB10 plan (where stubs spent 0 GPU-seconds). Because real parallel relaxations consume concurrent GPU time across parallel workers, the cap was increased to 14.0 GPU-hours via `~/kiln-h100/night2-h100-resume.toml` to allow completion of the remaining ~1,196 items.
+- **Who made the change:** Hemanath and Adhi.
+- **Decision timing:** Decided on 2026-11-01 **before unblinding or scoring of the H100 run**. The H100 run remains blinded; labels will only be loaded after the H100 run finishes and its prediction manifest hash is independently verified in #kiln-receipts.
