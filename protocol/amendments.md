@@ -12,7 +12,7 @@ Gate P has not happened. `protocol/protocol.md` is still a draft and has not bee
 | SHA-256 of `git cat-file blob <gate-p-commit>:protocol/protocol.md` | not yet |
 | Posted where and when (channel per OPEN-16, `protocol.md` §10) | not yet |
 | Receipt independently verified by (Adhi; Hemanath for any post Adhi makes, `protocol.md` §10) | not yet |
-| P2 code-freeze commit (on `dev`, `0c5eeea` or later; `protocol.md` §10) | not yet |
+| P2 code-freeze commit (`protocol.md` §10) | `d9a2993` (full SHA in `protocol.md` §10); re-recorded here if a later code or settings commit lands after the Gate P commit and before Night 2 |
 
 ## Before the Gate P commit (not amendments)
 
@@ -20,7 +20,7 @@ On 2026-10-31 Hemanath delegated the pre-freeze decisions. They are written into
 
 **Never deferred here (blocking, `protocol.md` §17 table 1).** These decide how predictions are made, scored or budgeted. The Gate P digest commits only to what `protocol.md` says at the Gate P commit, so each must be closed and written there (or cited from it by commit SHA) first. None of them ever gets an amendment entry here in place of that.
 
-- OPEN-06 and OPEN-07: written in `protocol.md` §6 (rule by Annamayya, `a10c149` and `0c5eeea`; thresholds 0.05 eV/atom by Hemanath, delegated). `proposal/review-flag-decomposable` is approved by Hemanath (2026-11-01) and adopted once Adhi confirms and merges it, before the P2 code-freeze commit, never here.
+- OPEN-06 and OPEN-07: written in `protocol.md` §6 (rule by Annamayya, `a10c149` and `0c5eeea`; thresholds 0.05 eV/atom by Hemanath, delegated). The decomposable-only review flag is adopted on `dev` (`1782ba6`, `docs/plan-changes.md` row 29) and described in `protocol.md` §6.
 - OPEN-05: the scoring rules, `protocol/scoring_rules.json` at `61f812b`, described and cited with its SHA-256 in `protocol.md` §3.3. The paragraph there on `p_react` and `category` being separate outputs was decided 2026-11-01 by Hemanath: intended as documented.
 - OPEN-02 and OPEN-03: the prices and the 32-unit per-item budget copied from `protocol/prices_proposal.json` at `1e8549b`. Any further change is written in `protocol.md` §5 before the Gate P commit.
 - `protocol/frozen_settings.json` with exactly the frozen values (`protocol.md` §5): Hemanath OK given 2026-11-01, pushed by Adhi in `4055d77`, SHA-256 recorded in §5.
@@ -29,7 +29,7 @@ The code items in `protocol.md` §17 table 2 (OPEN-23, OPEN-24, and the `evaluat
 
 **May follow the Gate P commit as dated entries below (non-blocking confirmations only, `protocol.md` §17 table 3).** None of these changes how a prediction is made, scored or budgeted:
 
-- P2: the code-freeze commit SHA (`0c5eeea` or later), recorded with the Gate P record.
+- P2: recorded in `protocol.md` §10 (`d9a2993`). Only a re-recording after the Gate P commit goes here.
 - OPEN-18: the `python -m kiln.data` rerun. A mismatch with the `protocol.md` §2.3 list is recorded here.
 - OPEN-22: the dataset attribution text.
 - OPEN-16: the name of the dedicated posting channel, separate from #kiln-alerts, and who can read it (CJ), and Adhi's agreement to check receipts. These are needed before the P3 post.
