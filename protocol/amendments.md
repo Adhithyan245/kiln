@@ -16,6 +16,23 @@ Gate P happened on 2026-11-01. `protocol/protocol.md` is frozen at the Gate P co
 
 Record written on 2026-11-01 from the values relayed by the orchestrator. When it was written, the Gate P commit, its commit time, its parents (`de0e33f` and `3ecfb37`), the digest (recomputed with the P3 command) and the P2 check were rechecked against `dev` at `c283468`. The Discord message was not fetched again for this record. The webhook URL is a secret and is not written here or anywhere in the repo (`AGENTS.md` rule 4).
 
+## Gate H record (Night 2 GB10 primary run)
+
+Gate H verification for the primary run happened on 2026-11-01. The Night 2 GB10 run produced 4,152 predictions across 12 runs (C1–C4 × 3 seeds × 346 held-out items), run at code `040f65d129 0d9ebadfd6 4ef33e6528 572bff923b` (`040f65d`), containing Gate P commit `c283468633 4c6bc768fd 0654a220b9 0df8b4985c`. Results, manifest and receipt were committed on `dev` at `e4854073b4 54b8ce96ab ae42e2813d 0fdaef7458` (`e4854073`). 5 items were scored on empty evidence after Gemini 503 errors (OPEN-23): C2-s0, C2-s1, C3-s0, C3-s2, C4-s0, one each. Full SHAs are written in blocks because `tests/protocol/test_protocol.py` rejects unbroken 40- to 64-character hex strings in this file. Join the blocks to compare.
+
+| Field | Value |
+|---|---|
+| Target / Scope | Night 2 primary run (GB10): C1–C4 × s0–s2 (12 runs, 4,152 total predictions) |
+| Manifest path | `protocol/predictions.manifest.json` |
+| Manifest SHA-256 | `b44cf1261297a1fa 6e1c2925fb6c738b 585fc468d2df3d10 5e8d489c8696e46f` |
+| Posted where and when (channel per OPEN-16, `protocol.md` §10) | #kiln-receipts (channel 1566322635749597355), through its dedicated prereg webhook: Discord message 1566368553345613947, 2026-11-01T08:29:24.838Z, recorded in `protocol/posts.jsonl` |
+| Posted by Adhi; receipt independently checked by Hemanath (`protocol.md` §10) | **Posted by Adhi** via `kiln.night.prereg`. **Independently verified by Hemanath on 2026-11-01:** the message was recorded with message id 1566368553345613947; the manifest SHA-256 matches the posted digest; all 12 prediction files match the manifest digests byte-for-byte; all 12 files contain exactly 346 lines (4,152 total predictions); post timestamp (08:29:24Z) is before label loading or unblinding; `.gitattributes` ensures line-ending stability across platforms. |
+| Run commit | `040f65d129 0d9ebadfd6 4ef33e6528 572bff923b` (`040f65d`) |
+| Commit containing results | `e4854073b4 54b8ce96ab ae42e2813d 0fdaef7458` (`e4854073`) |
+
+Record written on 2026-11-01. All 12 prediction files were verified locally against `protocol/predictions.manifest.json` and confirmed byte-exact before labels were loaded.
+
+
 ## Before the Gate P commit (not amendments)
 
 On 2026-10-31 Hemanath delegated the pre-freeze decisions. They are written into `protocol.md` itself (§15, rows marked "decided 2026-10-31 by Hemanath, delegated"), because decisions made before the Gate P commit belong in the hashed file, not here. Hemanath may veto any of them before he makes the Gate P commit.
