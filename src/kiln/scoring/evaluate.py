@@ -12,6 +12,11 @@ accuracy and macro-F1, coverage, flagged and unflagged accuracy, and compute
 accounting (totals, per tier, per tier and status). Bootstrap intervals and
 "correct changes" are unavailable until their definitions are agreed.
 
+A secondary binary split (``secondary_binary_split``) reports AUROC and Brier
+with only ``completely_reacted`` counted as reacted, as the Precursor Genome
+paper recommends reporting both splits. It sits next to the primary metrics,
+whose split (partially or completely reacted) is unchanged.
+
 A ``hard_subset`` slice is reported next to the all-pairs metrics, never
 instead of them, when the caller supplies a per-item thermodynamic-competition
 margin (computed upstream, e.g. by the B60meV baseline; None when unknown) and a
@@ -309,6 +314,19 @@ def _metrics(rows: list[tuple[Prediction, Label]]) -> dict[str, Any]:
     }
 
 
+def _complete_only(rows: list[tuple[Prediction, Label]]) -> dict[str, Any]:
+    """AUROC and Brier with only completely_reacted counted as reacted (the secondary split)."""
+    positive = [label.category == Category.completely_reacted for _, label in rows]
+    positives = [p.p_react for (p, _), pos in zip(rows, positive) if pos]
+    negatives = sorted(p.p_react for (p, _), pos in zip(rows, positive) if not pos)
+    auc = None
+    if positives and negatives:
+        midranks = sum((bisect_left(negatives, score) + bisect_right(negatives, score)) / 2 for score in positives)
+        auc = midranks / (len(positives) * len(negatives))
+    return {"reacted_means": "completely_reacted only", "n": len(rows), "n_reacted": len(positives), "auroc": auc,
+            "brier": sum((p.p_react - int(pos)) ** 2 for (p, _), pos in zip(rows, positive)) / len(rows)}
+
+
 def _slice_metrics(rows: list[tuple[Prediction, Label]]) -> dict[str, Any]:
     """``_metrics`` for a slice that may be empty: an empty slice reports n = 0
     and None for every rate, never 0 and never a division error."""
@@ -475,6 +493,7 @@ def evaluate(
         "split": splits.pop(),
         "source": sources.pop(),
         "metrics": _metrics(list(rows.values())),
+        "secondary_binary_split": _complete_only(list(rows.values())),
         "hard_subset": _hard_subset_report(hard_plan, rows),
         "bootstrap": _bootstrap(bootstrap_samples, bootstrap_seed),
         "compute_total": _tally(requests, moved),

@@ -81,6 +81,15 @@ def test_snapshot_metrics_and_compute_allocation(tmp_path):
     assert result["bootstrap"]["intervals"] == {}
 
 
+def test_secondary_split_counts_only_completely_reacted_and_leaves_primary_unchanged(tmp_path):
+    path, items, labels = fixture(tmp_path)
+    result = evaluate(path, items, lambda: labels, verify_posted_hash=lambda digest: True)
+    # Only c is completely reacted (score 0.4); a (0.8, partially reacted) now counts as not reacted.
+    assert result["secondary_binary_split"] == {"reacted_means": "completely_reacted only", "n": 4, "n_reacted": 1,
+                                                "auroc": 0.5, "brier": pytest.approx(1.17 / 4)}
+    assert result["metrics"]["auroc"] == 0.875 and result["metrics"]["brier"] == pytest.approx(0.1425)
+
+
 def test_compute_totals_by_tier_and_logged_changes(tmp_path):
     path, items, labels = fixture(tmp_path)
     requests = [
