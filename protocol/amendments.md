@@ -20,10 +20,10 @@ On 2026-10-31 Hemanath delegated the pre-freeze decisions. They are written into
 
 **Never deferred here (blocking, `protocol.md` §17 table 1).** These decide how predictions are made, scored or budgeted. The Gate P digest commits only to what `protocol.md` says at the Gate P commit, so each must be closed and written there (or cited from it by commit SHA) first. None of them ever gets an amendment entry here in place of that.
 
-- OPEN-06 and OPEN-07: written in `protocol.md` §6 (rule by Annamayya, `a10c149` and `0c5eeea`; thresholds 0.05 eV/atom by Hemanath, delegated). The pending `proposal/review-flag-decomposable` is decided by Hemanath and Adhi before the Gate P commit, never here.
-- OPEN-05: the scoring rules, `protocol/scoring_rules.json` at `61f812b`, described and cited with its SHA-256 in `protocol.md` §3.3. The paragraph there marked pending Hemanath (`p_react` and `category` are separate outputs) is settled before the Gate P commit.
+- OPEN-06 and OPEN-07: written in `protocol.md` §6 (rule by Annamayya, `a10c149` and `0c5eeea`; thresholds 0.05 eV/atom by Hemanath, delegated). `proposal/review-flag-decomposable` is approved by Hemanath (2026-11-01) and adopted once Adhi confirms and merges it, before the P2 code-freeze commit, never here.
+- OPEN-05: the scoring rules, `protocol/scoring_rules.json` at `61f812b`, described and cited with its SHA-256 in `protocol.md` §3.3. The paragraph there on `p_react` and `category` being separate outputs was decided 2026-11-01 by Hemanath: intended as documented.
 - OPEN-02 and OPEN-03: the prices and the 32-unit per-item budget copied from `protocol/prices_proposal.json` at `1e8549b`. Any further change is written in `protocol.md` §5 before the Gate P commit.
-- `protocol/frozen_settings.json` with exactly the frozen values (`protocol.md` §5), pushed by Adhi, with its SHA-256 filled in §5.
+- `protocol/frozen_settings.json` with exactly the frozen values (`protocol.md` §5): Hemanath OK given 2026-11-01, pushed by Adhi in `4055d77`, SHA-256 recorded in §5.
 
 The code items in `protocol.md` §17 table 2 (OPEN-23, OPEN-24, and the `evaluate.py` work for OPEN-08, OPEN-11 and OPEN-26) are not amendments either. The hashed text already says what that code must do.
 
