@@ -1,0 +1,141 @@
+{
+  "title": "Kiln scoring rules (protocol OPEN-05, section 3.3)",
+  "status": "Proposed for freeze by the evaluation owner. Fixed and label-free: no value here was set or tuned on outcomes (OPEN-10 closed with no development-label path). Changing anything under \"rules\" changes rules_sha256 and requires changing FROZEN_RULES_SHA256 in src/kiln/scoring/score.py.",
+  "rules_sha256": "4390d1a05adef5e6ed3afd4b9a796ff793a0aa936d0860c0a9fffe0a29a65e14",
+  "rules": {
+    "features": [
+      {
+        "name": "reaction_energy_ev_per_atom",
+        "kind": "value",
+        "sources": [
+          {"agent": "precursor", "artifact_type": "precursor_report", "value_key": "dE_ev_per_atom"},
+          {"agent": "thermo", "artifact_type": "reaction_report", "value_key": "dE_ev_per_atom"}
+        ],
+        "on_multiple": "latest_created",
+        "fallback": 0.0
+      },
+      {
+        "name": "reaction_energy_present",
+        "kind": "present",
+        "sources": [
+          {"agent": "precursor", "artifact_type": "precursor_report", "value_key": "dE_ev_per_atom"},
+          {"agent": "thermo", "artifact_type": "reaction_report", "value_key": "dE_ev_per_atom"}
+        ],
+        "on_multiple": "latest_created",
+        "fallback": null
+      },
+      {
+        "name": "decomposition_energy_present",
+        "kind": "present",
+        "sources": [
+          {"agent": "precursor", "artifact_type": "precursor_report", "value_key": "dE_ev_per_atom"}
+        ],
+        "on_multiple": "latest_created",
+        "fallback": null
+      },
+      {
+        "name": "furnace_minus_tammann_a_c",
+        "kind": "furnace_minus_value",
+        "sources": [
+          {"agent": "kinetics", "artifact_type": "kinetics_report", "value_key": "tammann_a_c"}
+        ],
+        "on_multiple": "require_equal",
+        "fallback": 0.0
+      },
+      {
+        "name": "furnace_minus_tammann_b_c",
+        "kind": "furnace_minus_value",
+        "sources": [
+          {"agent": "kinetics", "artifact_type": "kinetics_report", "value_key": "tammann_b_c"}
+        ],
+        "on_multiple": "require_equal",
+        "fallback": 0.0
+      }
+    ],
+    "p_react": {
+      "intercept": 0.0,
+      "terms": [
+        {"feature": "reaction_energy_ev_per_atom", "weight": -20.0},
+        {"feature": "furnace_minus_tammann_a_c", "weight": 0.005},
+        {"feature": "furnace_minus_tammann_b_c", "weight": 0.005}
+      ],
+      "link": "logistic"
+    },
+    "category_rules": [
+      {
+        "when": [{"subject": "reaction_energy_present", "op": "lt", "threshold": 0.5}],
+        "outcome": {
+          "category": "unreacted",
+          "cause": "insufficient_evidence",
+          "fix": "No single verifier-accepted reaction energy (missing or conflicting). Obtain a cached_lookup reaction energy before acting on this pair; this category is the rule set's defined fallback, not a call from evidence."
+        }
+      },
+      {
+        "when": [
+          {"subject": "decomposition_energy_present", "op": "ge", "threshold": 0.5},
+          {"subject": "reaction_energy_ev_per_atom", "op": "ge", "threshold": -0.05}
+        ],
+        "outcome": {
+          "category": "transformed",
+          "cause": "decomposes_only",
+          "fix": "A precursor reaches a sourced decomposition temperature, but its products have no decisive driving force to react with the other precursor. Choose a partner with a clearly negative reaction energy against the decomposition products, or a precursor that does not decompose at this temperature."
+        }
+      },
+      {
+        "when": [{"subject": "reaction_energy_ev_per_atom", "op": "ge", "threshold": -0.05}],
+        "outcome": {
+          "category": "unreacted",
+          "cause": "no_driving_force",
+          "fix": "The computed reaction energy is above -50 meV/atom, within about two standard deviations of computed reaction-energy error, so there is no decisive driving force. Choose precursors with a more negative reaction energy (for example a more reactive or higher-energy precursor)."
+        }
+      },
+      {
+        "when": [
+          {"subject": "furnace_minus_tammann_a_c", "op": "lt", "threshold": 0.0},
+          {"subject": "furnace_minus_tammann_b_c", "op": "lt", "threshold": 0.0}
+        ],
+        "outcome": {
+          "category": "unreacted",
+          "cause": "kinetically_limited",
+          "fix": "The furnace is below the Tammann temperature of both precursors, so neither lattice is expected to be mobile. Raise the furnace temperature above the lower Tammann temperature, or use a lower-melting precursor."
+        }
+      },
+      {
+        "when": [{"subject": "furnace_minus_tammann_a_c", "op": "lt", "threshold": 0.0}],
+        "outcome": {
+          "category": "partially_reacted",
+          "cause": "one_precursor_below_tammann",
+          "fix": "There is a driving force, but the furnace is below precursor A's Tammann temperature, so only precursor B is expected to be mobile. Raise the furnace temperature above both Tammann temperatures, or lengthen the dwell."
+        }
+      },
+      {
+        "when": [{"subject": "furnace_minus_tammann_b_c", "op": "lt", "threshold": 0.0}],
+        "outcome": {
+          "category": "partially_reacted",
+          "cause": "one_precursor_below_tammann",
+          "fix": "There is a driving force, but the furnace is below precursor B's Tammann temperature, so only precursor A is expected to be mobile. Raise the furnace temperature above both Tammann temperatures, or lengthen the dwell."
+        }
+      }
+    ],
+    "otherwise": {
+      "category": "completely_reacted",
+      "cause": "driving_force_and_mobility",
+      "fix": "No change suggested: there is a decisive driving force and the furnace is at or above both precursors' Tammann temperatures (or a missing Tammann temperature was taken as neutral and flagged)."
+    },
+    "disagreement_flag_reasons": ["conflict"],
+    "applicability_flag_reasons": ["outside_applicability"]
+  },
+  "justification": {
+    "reaction_energy_ev_per_atom": "Thermodynamic driving force of the precursor pair, eV/atom, from Thermo's reaction_report (latest accepted estimate, so an escalated single_point or bounded_relaxation supersedes cached_lookup). When the Precursor agent has an accepted decomposition-aware energy (it requests decomposition_reeval only when the furnace is at or above a sourced decomposition temperature), that energy is used first, because the decomposition products are what react.",
+    "reaction_energy_fallback": "0.0 eV/atom: a missing or conflicting reaction energy contributes nothing to p_react (neutral), raises a missing_evidence or conflict flag, and gives the 'insufficient_evidence' category through reaction_energy_present.",
+    "driving_force_threshold_-0.05_ev_per_atom": "Reaction energies at or above -50 meV/atom are not a decisive driving force. Hautier, Ong, Jain, Moore and Ceder, Phys. Rev. B 85, 155208 (2012), doi 10.1103/PhysRevB.85.155208: GGA+U errors on reactions forming ternary oxides from binary oxides are close to normal with a standard deviation of 24 meV/atom (rms 34.4 meV/atom), so 50 meV/atom is about two standard deviations. It is also the borderline band T_rxn proposed for Thermo's escalation rule (docs/escalation-rule.md).",
+    "driving_force_weight_-20_per_ev_per_atom": "One logit unit per 50 meV/atom of driving force, the same 50 meV/atom scale as the threshold. A scale convention, not a fitted value.",
+    "tammann_comparison": "Tammann's rule: solid-state reactivity becomes appreciable when the temperature reaches a fixed fraction of a reactant's absolute melting point (Merkle and Maier, 'On the Tammann-Rule', Z. anorg. allg. Chem. 631, 1163-1166 (2005), doi 10.1002/zaac.200400540). Kiln's Tammann temperatures are Kinetics' tool values (kiln.tools.tammann, 2/3 of the absolute melting point); this rule set compares them with the furnace setpoint at the natural threshold 0 degrees C: furnace below both Tammann temperatures is kinetically limited; below exactly one is partially reacted; at or above both is completely reacted.",
+    "tammann_weight_0.005_per_c": "One logit unit per 200 degrees C of furnace margin above each precursor's Tammann temperature (one per 100 degrees C on the mean margin). A scale convention, not a fitted value; it keeps the kinetic term comparable to the driving-force term over a few hundred degrees.",
+    "tammann_fallback": "0 degrees C (furnace taken as at the Tammann temperature): a missing Tammann temperature contributes nothing to p_react, never triggers a kinetic cause, and raises a missing_evidence flag, so the call falls back to the driving-force evidence alone.",
+    "decomposition": "Precursor decomposition below the furnace temperature is read from what the Precursor agent emits: a decomposition-aware dE_ev_per_atom in its precursor_report exists only when the furnace is at or above a sourced decomposition temperature. If that energy is not a decisive driving force, the pair is 'transformed' (a precursor changed on its own but did not react). Unknown decomposition temperatures are flagged by kiln.review, not here.",
+    "B60meV": "Not used. Szymanski et al., Science Advances 10(27), 2024, doi 10.1126/sciadv.adp3309, found the first product to form predictable when its driving force exceeds every competing phase's by at least 60 meV/atom. That is a competition margin between products, which no specialist emits, and it is about which product forms first, not whether a pair reacts. It stays a regime marker in the baselines (OPEN-25) and is not a p_react input or category boundary here.",
+    "p_react": "A fixed-rule score in [0, 1] used for ranking (AUROC) and Brier. It is not a calibrated probability (AGENTS.md rule 10).",
+    "changed_prediction": "OPEN-17: a compute request changed the prediction when the provisional four-class category differs before and after it (kiln.scoring.score.changed_prediction)."
+  }
+}

@@ -56,14 +56,24 @@ def artifact(item):
                     verifier=VerifierStatus.accepted)
 
 
-def test_both_entry_points_fail_closed_without_frozen_rules(item, artifact):
+def test_score_fails_closed_without_run_context(item, artifact):
     # Round-trip synthetic input through the shared schema before scoring.
     accepted = [Artifact.model_validate_json(artifact.model_dump_json())]
     flags = [ReviewFlag(reason="missing_evidence", detail="synthetic missing input")]
-    with pytest.raises(ScoringConfigurationError, match="frozen rules"):
-        provisional(item, accepted)
     with pytest.raises(ScoringConfigurationError, match="run context"):
         score(item, accepted, [], flags)
+    config = RunConfig(run_id="run", condition="C1", seed=0, model="synthetic-model")
+    with pytest.raises(ScoringConfigurationError, match="run context"):
+        score(item, accepted, [], flags, config=config)
+    with pytest.raises(ScoringConfigurationError, match="run context"):
+        score(item, accepted, [], flags, cost=Cost())
+
+
+def test_provisional_uses_the_frozen_rules(item, artifact):
+    # The module-level entry point no longer fails closed: it applies the rule
+    # file, whose behaviour is tested in tests/scoring/test_frozen_rules.py.
+    p_react, category = provisional(item, [Artifact.model_validate_json(artifact.model_dump_json())])
+    assert 0.0 <= p_react <= 1.0 and isinstance(category, Category)
 
 
 @pytest.mark.parametrize("status", [VerifierStatus.pending, VerifierStatus.rejected, VerifierStatus.inconclusive])
@@ -470,8 +480,23 @@ def test_latest_created_uses_newest_and_rejects_ties(item):
     assert prediction.p_react == pytest.approx(0.5)
     assert prediction.evidence == ["run:thermo:1", "run:kinetics:2"]
     tie = old.model_copy(update={"created_at": new.created_at})
-    with pytest.raises(ConflictingEvidenceError):
-        engine.provisional(item, [thermo, new, tie])
+    # The tammann feature has a fallback, so a tie that disagrees uses it and is
+    # flagged as a conflict instead of failing (AGENTS.md rule 9).
+    assert engine.provisional(item, [thermo, new, tie]) == engine.provisional(item, [thermo])
+    prediction = engine.score(item, [thermo, new, tie], [], [], cost=Cost())
+    [flag] = prediction.review_flags
+    assert flag.reason == ReviewReason.conflict and "'tammann'" in flag.detail
+    assert set(flag.evidence) == {"run:kinetics:1", "run:kinetics:2"}
+    assert prediction.disagreements == [flag.detail] and prediction.needs_review
+    assert prediction.evidence == ["run:thermo:1"]
+
+
+def test_conflict_without_fallback_still_fails(item):
+    engine = engine_for(synthetic_rules())
+    old = make_artifact(1, values={"dE_ev_per_atom": 0.1})
+    tie = make_artifact(2, values={"dE_ev_per_atom": 0.2})
+    with pytest.raises(ConflictingEvidenceError, match="different values"):
+        engine.score(item, [old, tie], [], [], cost=Cost())
 
 
 @pytest.mark.parametrize("value", ["0.4", True, float("nan"), float("inf")])

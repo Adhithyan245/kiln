@@ -41,7 +41,12 @@ def rules(**overrides):
                                    CategoryRule, ScoringRules])
 def test_every_field_is_required(model):
     # No weight, threshold, mapping, fallback or outcome has a built-in default.
-    assert all(field.is_required() for field in model.model_fields.values())
+    # Feature.kind is the one exception: its default, "value", is the meaning a
+    # feature had before kind existed, and it is left out of the canonical form.
+    optional = {"kind"} if model is Feature else set()
+    assert {name for name, field in model.model_fields.items() if not field.is_required()} == optional
+    if model is Feature:
+        assert Feature.model_fields["kind"].default == "value"
 
 
 def test_rules_are_immutable_and_reject_unknown_fields():
