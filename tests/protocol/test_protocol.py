@@ -18,7 +18,8 @@ class ProtocolDraftTest(unittest.TestCase):
         cls.text = PROTOCOL.read_text(encoding="utf-8")
 
     def test_marked_as_unfrozen_draft(self) -> None:
-        self.assertIn("**Status: DRAFT. Not frozen, not hashed, not posted. Not ready for held-out runs.**", self.text)
+        self.assertIn("**Status: Gate P commit.** This file is frozen at the Gate P commit", self.text)
+        self.assertIn("**Never edited after the Gate P commit** (§10, P5)", self.text)
         self.assertNotRegex(self.text, r"(?i)status:\s*(frozen|final|locked|ready)")
         self.assertNotRegex(self.text, r"(?i)protocol (is|has been) (frozen|ready|hashed|posted)")
 
