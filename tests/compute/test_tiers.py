@@ -80,6 +80,26 @@ def test_cached_lookup(cache_dir: Path) -> None:
     assert out.gpu_seconds == 0.0
 
 
+def test_cached_lookup_reports_the_nearest_off_hull_competitor(cache_dir: Path) -> None:
+    # The product CaTiO3 is on the hull (never the competitor); Ca2O2 is a CaO polymorph (a reactant,
+    # excluded); the metastable CaTiO3 polymorph 0.04 eV/atom above the hull is the competitor.
+    out = run_tier(ComputeTier.cached_lookup, PAIR, {}, cache_dir=cache_dir)
+    assert out.result["competitor_e_hull_status"] == "ok"
+    assert out.result["competitor_e_hull_ev_per_atom"] == pytest.approx(0.04)
+    assert out.result["competitor_formula"] == "CaTiO3"
+
+
+def test_no_off_hull_phase_on_the_join_is_none_not_zero() -> None:
+    from kiln.compute.tiers import nearest_competitor
+
+    entries = [e for e in ca_ti_o_entries() if e.composition.reduced_formula != "CaTiO3"
+               or e.energy_per_atom == min(x.energy_per_atom for x in ca_ti_o_entries()
+                                           if x.composition.reduced_formula == "CaTiO3")]
+    assert nearest_competitor("CaO", "TiO2", entries) == {
+        "competitor_e_hull_ev_per_atom": None, "competitor_formula": None,
+        "competitor_e_hull_status": "none_on_join"}
+
+
 def test_decomposition_reeval_replaces_precursor(cache_dir: Path) -> None:
     inputs = {"precursor_a": "CaTiO3", "precursor_b": "TiO2", "decomposed": {"CaTiO3": "CaO"}}
     out = run_tier(ComputeTier.decomposition_reeval, inputs, {}, cache_dir=cache_dir)

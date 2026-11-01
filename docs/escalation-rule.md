@@ -9,7 +9,7 @@ Thermo always starts with the cheapest evidence, `cached_lookup` (Materials Proj
 | Escalate when | To |
 |---|---|
 | (a) the reaction driving force is borderline: \|ΔE_rxn\| ≤ **T_rxn** (*recommended* 0.02 eV/atom from development data, below; was 0.05), or | `single_point` (MACE energy of every candidate phase) |
-| (b) a candidate product lies within **0.1 eV/atom of the hull, including on it** (0 ≤ E_hull ≤ 0.1) | `single_point` |
+| (b) a competing phase on the a–b join lies **just above the hull**: 0 < `competitor_e_hull_ev_per_atom` ≤ **0.1** with `competitor_e_hull_status` = `ok` (from `cached_lookup`; `none_on_join` never triggers). The reaction's own products are hull phases (E_hull = 0 by construction), so testing them would fire on every reacting pair | `single_point` |
 | the `single_point` result still leaves (a) or (b) true, **or** \|ΔE_mlip − ΔE_mp\| > **T_disagree** (*recommended* 0.05 eV/atom, checked below) | `bounded_relaxation` (force **and** stress criteria, step cap) |
 
 Otherwise Thermo stops: the cheap answer is not going to flip.

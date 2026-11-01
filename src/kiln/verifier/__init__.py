@@ -10,7 +10,7 @@ from kiln.schemas import Artifact, ComputeRequest, ComputeStatus, Cost, RunConfi
 # Numeric value keys are the unit-bearing keys listed in docs/interfaces.md.
 # Energies come from the compute service (docs/interfaces.md step 4); Tammann
 # temperatures and precursor properties come from deterministic tools (step 5).
-_COMPUTE_KEYS = frozenset({"dE_ev_per_atom", "dE_mlip_minus_mp_ev_per_atom"})
+_COMPUTE_KEYS = frozenset({"dE_ev_per_atom", "dE_mlip_minus_mp_ev_per_atom", "competitor_e_hull_ev_per_atom"})
 _TOOL_KEYS = frozenset({"tammann_a_c", "tammann_b_c", "decomposes_at_c", "volatile_above_c"})
 _NUMERIC_KEYS = _COMPUTE_KEYS | _TOOL_KEYS
 

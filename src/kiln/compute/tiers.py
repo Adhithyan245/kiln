@@ -83,10 +83,35 @@ def _reaction_result(r: mp.ReactionEnergy, prefix: str = "") -> Result:
             f"{prefix}mixing_ratio": r.mixing_ratio}
 
 
+ON_HULL_EV_PER_ATOM = 1e-6
+
+
+def nearest_competitor(a: str, b: str, entries: list[ComputedEntry]) -> Result:
+    """The lowest-E_hull phase on the a-b join that is not on the convex hull: the competitor a
+    second energy estimate could make stable. The reaction's products are hull phases (E_hull = 0),
+    so they are never the competitor; neither are polymorphs of the reactants themselves.
+
+    competitor_e_hull_status is "ok" (value and formula set) or "none_on_join" (no off-hull phase
+    lies on the join; value and formula are None). A lookup that fails returns no result at all."""
+    pd = PhaseDiagram(entries)
+    ca, cb = Composition(a), Composition(b)
+    reactants = {ca.reduced_formula, cb.reduced_formula}
+    off_hull = [(pd.get_e_above_hull(e), e) for e in entries
+                if e.composition.reduced_formula not in reactants and _on_join(e.composition, ca, cb)]
+    off_hull = [(h, e) for h, e in off_hull if h > ON_HULL_EV_PER_ATOM]
+    if not off_hull:
+        return {"competitor_e_hull_ev_per_atom": None, "competitor_formula": None,
+                "competitor_e_hull_status": "none_on_join"}
+    h, e = min(off_hull, key=lambda t: (t[0], str(t[1].entry_id)))
+    return {"competitor_e_hull_ev_per_atom": float(h), "competitor_formula": e.composition.reduced_formula,
+            "competitor_e_hull_status": "ok"}
+
+
 def _mp_lookup(inputs: dict[str, Any], cache_dir: Path) -> BackendResult:
     a, b = _pair(inputs)
     entries = mp.load_entries(mp.chemsys_for(a, b), cache_dir=cache_dir)
     return BackendResult(ComputeStatus.ok, {**_reaction_result(mp.reaction_energy(a, b, entries)),
+                                            **nearest_competitor(a, b, entries),
                                             "source": "materials_project"})
 
 

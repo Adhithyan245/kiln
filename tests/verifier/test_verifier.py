@@ -148,6 +148,17 @@ def test_escalated_artifact_matching_one_cited_result_is_accepted():
     assert (status, notes) == (VerifierStatus.accepted, "Checks passed")
 
 
+def test_competitor_e_hull_is_checked_against_the_cited_lookup():
+    lookup = [request(tier="cached_lookup", result={"dE_ev_per_atom": -0.1,
+                                                     "competitor_e_hull_ev_per_atom": 0.04})]
+    good = artifact(values={"dE_ev_per_atom": -0.1, "competitor_e_hull_ev_per_atom": 0.04},
+                    compute_requests=["request-1"], claims=[claim()], cost=Cost(compute_units=2))
+    assert check(good, lookup, Cost(compute_units=2)) == (VerifierStatus.accepted, "Checks passed")
+    bad = artifact(values={"dE_ev_per_atom": -0.1, "competitor_e_hull_ev_per_atom": 0.03},
+                   compute_requests=["request-1"], cost=Cost(compute_units=2))
+    assert check(bad, lookup, Cost(compute_units=2))[0] == VerifierStatus.rejected
+
+
 def test_escalated_artifact_matching_no_cited_result_is_rejected():
     target = artifact(values={"dE_ev_per_atom": -0.09}, compute_requests=["request-1", "request-2"],
                       cost=Cost(compute_units=7))
