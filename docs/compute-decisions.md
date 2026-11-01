@@ -22,6 +22,7 @@ Source: `results/gb10/first_calcs_float64.json`, `results/gb10/first_calcs_float
 - Tested with the team key: `gemini-3.8-flash`, `gemini-3.1-flash-lite` and `gemini-3-flash-preview` all answer. `gemini-2.5-flash` is closed to new users (API returns 404), so nothing may default to it.
 - `gemini-3.8-flash` is the newest Flash model available: the strongest agents at Flash cost. Fallback if the spend check after the first 20 runs (plan Section 11) runs high: `gemini-3.1-flash-lite`.
 - The same model for every condition and seed (plan Section 6). The exact model id goes into `RunConfig.model` and the protocol.
+- **Training cutoff (for protocol §11, OPEN-04):** Google DeepMind's model card states "The knowledge cutoff date for Gemini 3.8 Flash is March 2026", adding that in some areas its knowledge may be limited to January 2025 (Gemini 3 family). Source: [Gemini 3.8 Flash model card](https://deepmind.google/models/model-cards/gemini-3-8-flash/), published 2 September 2026, read Sat Oct 31. Both dates are before the dataset's publication (The Precursor Genome, 2026-07-09), so the model cannot have seen the paper or its labels. It may still know older published syntheses of some of the same pairs; the cutoff alone doesn't rule that out.
 
 ## 3. Open
 

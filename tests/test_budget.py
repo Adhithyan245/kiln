@@ -65,6 +65,16 @@ def test_spent_is_a_copy():
     assert b.spent.tool_calls == 1
 
 
+def test_item_cost_is_the_cumulative_cost_for_the_verifier():
+    b = make_budget()
+    b.charge_tool_call()
+    b.charge_compute(1.5)
+    b.charge_tokens(10, 5)
+    assert b.item_cost == b.spent
+    b.item_cost.tool_calls = 99   # a copy: the verifier can't change what was charged
+    assert b.spent.tool_calls == 1
+
+
 def test_thread_safe_charging_never_overspends():
     b = make_budget(max_compute_units_per_item=10.0)
     refused = []

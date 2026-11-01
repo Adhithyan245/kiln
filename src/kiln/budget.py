@@ -77,3 +77,9 @@ class Budget:
         """A copy of everything charged so far, for Prediction.cost and cost.json."""
         with self._lock:
             return self._spent.model_copy()
+
+    @property
+    def item_cost(self) -> Cost:
+        """The item's cumulative cost so far: what `kiln.verifier.verify` takes as `item_cost` (OPEN-24).
+        Read it while no compute request for the item is in flight."""
+        return self.spent
