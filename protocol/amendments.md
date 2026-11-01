@@ -19,9 +19,9 @@ On 2026-10-31 Hemanath delegated the pre-freeze decisions. They are written into
 
 **Never deferred here (blocking, `protocol.md` §17 table 1).** These decide how predictions are made, scored or budgeted. The Gate P digest commits only to what `protocol.md` says at the Gate P commit, so each must be closed and written there (or cited from it by commit SHA) first. None of them ever gets an amendment entry here in place of that.
 
-- OPEN-06 and OPEN-07: Annamayya's escalation rule and flag thresholds, or an explicit team decision in `docs/plan-changes.md` to freeze the null-margin design knowingly. Under that design no agent posts a need, C2 and C4 are identical, and the need board is never used.
+- OPEN-06 and OPEN-07: Annamayya's escalation rule and flag thresholds, or an explicit team decision in `docs/plan-changes.md` to freeze the null-margin design knowingly. Under that design no agent posts a need, C2 and C4 are the same design, and the need board is never used.
 - OPEN-05: the scoring rules, `protocol/scoring_rules.json`, on `dev` and cited by commit SHA.
-- OPEN-02 and OPEN-03: Adhi's review of the prices and budget copied from `protocol/prices_proposal.json` at `e5d81a2`, including whether the per-item cap is 31.0 or 31.3 units.
+- OPEN-02 and OPEN-03: the prices and the 32-unit per-item budget copied from `protocol/prices_proposal.json` at `1e8549b`. Any further change is written in `protocol.md` §5 before the Gate P commit.
 - `protocol/frozen_settings.json` with exactly the frozen values, cited by commit SHA.
 
 The code items in `protocol.md` §17 table 2 (OPEN-23, OPEN-24, and the `evaluate.py` work for OPEN-08, OPEN-11 and OPEN-26) are not amendments either. The hashed text already says what that code must do.
