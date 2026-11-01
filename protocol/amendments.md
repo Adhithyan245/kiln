@@ -4,15 +4,17 @@ This file is **not** part of the Gate P hash. `protocol/protocol.md` is never ed
 
 ## Gate P record
 
-Gate P has not happened. `protocol/protocol.md` is still a draft and has not been frozen, hashed or posted.
+Gate P happened on 2026-11-01. `protocol/protocol.md` is frozen at the Gate P commit below and is never edited again (`protocol.md` §10, P5); held-out runs may start (P4). Full SHAs are written in blocks, commit SHAs as four 10-character blocks and the digest as four 16-character blocks, because `tests/protocol/test_protocol.py` rejects unbroken 40- to 64-character hex strings in this file. Join the blocks to compare.
 
 | Field | Value |
 |---|---|
-| Gate P commit (full SHA, pushed to `dev`) | not yet |
-| SHA-256 of `git cat-file blob <gate-p-commit>:protocol/protocol.md` | not yet |
-| Posted where and when (channel per OPEN-16, `protocol.md` §10) | not yet |
-| Posted by Adhi; receipt independently checked by Hemanath (`protocol.md` §10) | not yet |
-| P2 code-freeze commit (`protocol.md` §10) | `d9a2993` (full SHA in `protocol.md` §10); re-recorded here if a later code or settings commit lands after the Gate P commit and before Night 2 |
+| Gate P commit (full SHA, pushed to `dev`) | `c283468633 4c6bc768fd 0654a220b9 0df8b4985c` (`c283468`): the merge of PR #26 into `dev`, committed 2026-11-01T05:32:57Z |
+| SHA-256 of `git cat-file blob <gate-p-commit>:protocol/protocol.md` | `3ca68ee18b1ccc35 4167c2fa744923c4 cbcaba5cbfbdc986 819d45f58f2edf7b` |
+| Posted where and when (channel per OPEN-16, `protocol.md` §10) | #kiln-receipts (channel 1566322635749597355), through its own webhook, separate from the alerts webhook: Discord message 1566325150582964286, 2026-11-01T05:36:56.813Z, https://discord.com/channels/1566155357875867772/1566322635749597355/1566325150582964286 |
+| Posted by Adhi; receipt independently checked by Hemanath (`protocol.md` §10) | **Posted by Adhi** through the #kiln-receipts webhook. **Independently verified by Hemanath on 2026-11-01:** the message was fetched from Discord through the receipts webhook; its webhook id, 1566322680859205672, matches the #kiln-receipts webhook; the message was not edited; its content contains the exact Gate P commit SHA and digest; the digest recomputed from the commit matches; and the post time (05:36:56Z) is after the commit time (05:32:57Z) |
+| P2 code-freeze commit (`protocol.md` §10) | `d9a2993997 530fa4cee0 f9216b78df 2b5189b127` (`d9a2993`, as in `protocol.md` §10). No code or settings change between P2 and the Gate P commit: `git diff --stat d9a2993 c283468 -- src env data/precursor_props.csv protocol/frozen_settings.json protocol/scoring_rules.json pyproject.toml uv.lock` prints nothing. Re-recorded here if a later code or settings commit lands before Night 2 |
+
+Record written on 2026-11-01 from the values relayed by the orchestrator. When it was written, the Gate P commit, its commit time, its parents (`de0e33f` and `3ecfb37`), the digest (recomputed with the P3 command) and the P2 check were rechecked against `dev` at `c283468`. The Discord message was not fetched again for this record. The webhook URL is a secret and is not written here or anywhere in the repo (`AGENTS.md` rule 4).
 
 ## Before the Gate P commit (not amendments)
 

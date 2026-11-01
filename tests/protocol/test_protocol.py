@@ -57,7 +57,7 @@ class ProtocolDraftTest(unittest.TestCase):
         self.assertIn("`protocol/protocol.md` is never edited", self.text)
         amendments = AMENDMENTS.read_text(encoding="utf-8")
         self.assertIn("This file is **not** part of the Gate P hash.", amendments)
-        self.assertIn("Gate P has not happened.", amendments)
+        self.assertIn("Gate P happened on 2026-11-01.", amendments)
         self.assertNotRegex(amendments, r"\b[0-9a-fA-F]{40,64}\b")
 
     def test_decisions_left_open(self) -> None:
