@@ -1,0 +1,9 @@
+C1-gemini-3.8-flash-s0-dev: tokens/item median 2617 max 2681  usd 0.0359  wall/item median 28.0s  gpu_s 0.0
+   requests {('cached_lookup', 'cached'): 5, ('decomposition_reeval', 'cached'): 1}  needs Counter()  suppressed 4  verifier-not-accepted 0
+C2-gemini-3.8-flash-s0-dev: tokens/item median 1595 max 1702  usd 0.0169  wall/item median 29.4s  gpu_s 61.7
+   requests {('cached_lookup', 'cached'): 5, ('single_point', 'cached'): 4, ('bounded_relaxation', 'cached'): 1, ('decomposition_reeval', 'cached'): 1, ('bounded_relaxation', 'not_converged'): 1, ('bounded_relaxation', 'ok'): 2}  needs Counter()  suppressed 0  verifier-not-accepted 0
+C3-gemini-3.8-flash-s0-dev: tokens/item median 2962 max 3713  usd 0.0376  wall/item median 32.5s  gpu_s 26.1
+   requests {('cached_lookup', 'cached'): 5, ('single_point', 'cached'): 4, ('bounded_relaxation', 'cached'): 3, ('decomposition_reeval', 'cached'): 1, ('bounded_relaxation', 'not_converged'): 1}  needs Counter()  suppressed 4  verifier-not-accepted 0
+C4-gemini-3.8-flash-s0-dev: tokens/item median 1846 max 2090  usd 0.0208  wall/item median 18.1s  gpu_s 27.5
+   requests {('cached_lookup', 'cached'): 5, ('single_point', 'cached'): 4, ('bounded_relaxation', 'cached'): 3, ('decomposition_reeval', 'cached'): 1, ('bounded_relaxation', 'not_converged'): 1}  needs Counter({'fulfilled': 1})  suppressed 0  verifier-not-accepted 0
+ALL-DONE
