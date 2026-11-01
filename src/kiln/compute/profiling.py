@@ -71,9 +71,16 @@ def propose_prices(tiers: Mapping[str, Mapping[str, Any]], floor: float = FLOOR_
     }
 
 
+def _round_up(units: float) -> float:
+    """Like _round, but never below `units`: a budget rounded down can't afford the path it is for."""
+    digits = 2 if units < 1 else 1 - math.floor(math.log10(units))
+    scale = 10 ** digits
+    return math.ceil(round(units * scale, 6)) / scale
+
+
 def propose_budget(prices: Mapping[str, float]) -> float:
-    """Units for one full escalation path per pair."""
-    return _round(sum(prices[t.value] for t in ESCALATION_PATH))
+    """Units for one full escalation path per pair (rounded up, so the whole path always fits)."""
+    return _round_up(math.fsum(prices[t.value] for t in ESCALATION_PATH))
 
 
 def night2_fit(single_point_median_s: float, budget_units: float, *, hours: float, workers: int = 1,

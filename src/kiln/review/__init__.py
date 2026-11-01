@@ -15,10 +15,15 @@ def flags(item: Item, accepted: Sequence[Artifact], requests: Sequence[ComputeRe
         raise ValueError("disagreement threshold must be finite and nonnegative")
     result = []
     usable = [a for a in accepted if a.item_id == item.item_id and a.verifier == VerifierStatus.accepted]
-    if not any(a.agent == "kinetics" for a in usable) or not any(a.agent == "thermo" for a in usable):
+    has_kinetics = any(a.agent == "kinetics" and all(isinstance(a.values.get(f"tammann_{side}_c"), (int, float))
+                       and not isinstance(a.values.get(f"tammann_{side}_c"), bool) for side in ("a", "b")) for a in usable)
+    has_thermo = any(a.agent == "thermo" and isinstance(a.values.get("dE_ev_per_atom"), (int, float))
+                     and not isinstance(a.values.get("dE_ev_per_atom"), bool) for a in usable)
+    if not has_kinetics or not has_thermo:
         result.append(ReviewFlag(reason=ReviewReason.missing_evidence, detail="Accepted kinetics or thermodynamic evidence is missing."))
-    if any(a.agent == "precursor" and any(a.values.get(f"precursor_{side}_decomposition_known") is False
-            for side in ("a", "b")) for a in usable):
+    precursor_reports = [a for a in usable if a.agent == "precursor" and a.fulfills_need is None]
+    if not precursor_reports or not any(all(a.values.get(f"precursor_{side}_decomposition_known") is True
+                                       for side in ("a", "b")) for a in precursor_reports):
         result.append(ReviewFlag(reason=ReviewReason.missing_evidence, detail="A precursor decomposition temperature is unknown."))
     for a in usable:
         if a.values.get("decomposition_conditions_unverified") is True:
