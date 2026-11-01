@@ -113,6 +113,22 @@ def test_a_second_process_cannot_run_the_same_run_at_once(tmp_path: Path) -> Non
     assert len(jsonl(run_dir / "predictions.jsonl")) == 3
 
 
+@pytest.mark.parametrize("condition", ["C1", "C2", "C3", "C4"])
+def test_real_agents_and_the_frozen_scorer_predict_through_the_runner(tmp_path: Path, condition: str) -> None:
+    from kiln.runners.conditions import real_components
+
+    real = real_components({"energy_margin_ev_per_atom": 0.05, "disagreement_threshold_ev_per_atom": 0.05})
+    components = Components(compute=lambda run_dir, c: stubs.StubCompute(run_dir, c.tier_prices),  # no GPU in tests
+                            specialists=real.specialists, tool_values=real.tool_values, flags=real.flags,
+                            scorer=real.scorer, stub_parts=("compute",))
+    prices = {"cached_lookup": 0.1, "single_point": 1.0, "bounded_relaxation": 30.0, "decomposition_reeval": 0.2}
+    run_dir = go(tmp_path, condition, items=ITEMS[:2], components=components, tier_prices=prices,
+                 max_compute_units_per_item=32.0)
+    preds = jsonl(run_dir / "predictions.jsonl")
+    assert [p["item_id"] for p in preds] == ["T-0", "T-1"] and not jsonl(run_dir / "failed_items.jsonl")
+    assert all(0 <= p["p_react"] <= 1 for p in preds)
+
+
 class Fabricator(Agent):
     """Posts an energy no compute request produced: the verifier must reject it."""
     name = "thermo"
@@ -181,8 +197,10 @@ def test_a_failing_item_is_logged_and_the_run_continues_then_stops_on_a_streak(t
 def test_real_components_wire_annamayyas_agents_with_the_frozen_thresholds() -> None:
     from kiln.runners.conditions import real_components
 
+    from kiln.scoring.score import frozen_engine
+
     comp = real_components({"energy_margin_ev_per_atom": 0.05, "disagreement_threshold_ev_per_atom": 0.05})
-    assert comp.stub_parts == ("scorer",)
+    assert comp.stub_parts == () and not comp.stubs and comp.scorer is frozen_engine
     agents = comp.specialists(object(), cfg("C4"))
     assert sorted(a.name for a in agents) == ["kinetics", "precursor", "thermo"]
     assert all(getattr(a, "energy_margin", 0.05) == 0.05 for a in agents)

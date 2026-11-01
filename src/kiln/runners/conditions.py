@@ -102,8 +102,8 @@ AGENT_SETTINGS = ("energy_margin_ev_per_atom", "disagreement_threshold_ev_per_at
 
 
 def real_components(agent_settings: Mapping[str, float | None]) -> Components:
-    """Annamayya's specialists, tools and flags, and the real compute client. The scorer stays the
-    stand-in until the protocol freezes the scoring rules (OPEN-05), and says so."""
+    """Annamayya's specialists, tools and flags, the real compute client and the frozen scorer
+    (score.frozen_engine, which fails closed unless the rules match the frozen digest, OPEN-05)."""
     from functools import partial
 
     from kiln.agents.kinetics import Kinetics
@@ -114,7 +114,7 @@ def real_components(agent_settings: Mapping[str, float | None]) -> Components:
     from kiln.compute.client import ComputeClient
     from kiln.compute.profile import load_tier_settings
     from kiln.review import flags
-    from kiln.runners.stubs import StubScorer
+    from kiln.scoring.score import frozen_engine
     from kiln.tools.tammann import item_tool_values
 
     margin = agent_settings.get("energy_margin_ev_per_atom")
@@ -127,8 +127,7 @@ def real_components(agent_settings: Mapping[str, float | None]) -> Components:
                                           Kinetics(energy_margin_ev_per_atom=margin)],
         tool_values=item_tool_values,
         flags=partial(flags, disagreement_threshold=disagree),
-        scorer=StubScorer,
-        stub_parts=("scorer",),
+        scorer=frozen_engine,
         agent_settings={"energy_margin_ev_per_atom": margin, "disagreement_threshold_ev_per_atom": disagree},
     )
 
