@@ -113,18 +113,31 @@ def test_cache_is_shared_across_runs(tmp_path: Path) -> None:
     assert hit.status == ComputeStatus.cached and backend.calls == 1
 
 
-@pytest.mark.parametrize("status", [ComputeStatus.not_converged, ComputeStatus.failed])
-def test_failures_are_charged_logged_never_cached(paths, status) -> None:
+def test_failed_requests_are_charged_logged_never_cached(paths) -> None:
     run_dir, cache_dir = paths
-    backend = StubBackend(forced={ComputeTier.bounded_relaxation: status})
+    backend = StubBackend(forced={ComputeTier.bounded_relaxation: ComputeStatus.failed})
     client, budget = make_client(run_dir, cache_dir, backend), Budget(make_config())
     first = ask(client, budget, tier=ComputeTier.bounded_relaxation)
     second = ask(client, budget, tier=ComputeTier.bounded_relaxation)
-    assert first.status == second.status == status
+    assert first.status == second.status == ComputeStatus.failed
     assert backend.calls == 2
     assert ResultCache(cache_dir).get(first.cache_key) is None
     assert budget.spent.compute_units == 8.0
-    assert [r["status"] for r in read_log(run_dir)] == [status.value, status.value]
+    assert [r["status"] for r in read_log(run_dir)] == ["failed", "failed"]
+
+
+def test_a_not_converged_result_is_not_recomputed_and_stays_not_converged(paths) -> None:
+    run_dir, cache_dir = paths
+    backend = StubBackend(forced={ComputeTier.bounded_relaxation: ComputeStatus.not_converged})
+    client, budget = make_client(run_dir, cache_dir, backend), Budget(make_config())
+    first = ask(client, budget, tier=ComputeTier.bounded_relaxation)
+    second = ask(client, budget, tier=ComputeTier.bounded_relaxation)
+    assert backend.calls == 1                                                  # the failing relaxation ran once
+    assert first.status == second.status == ComputeStatus.not_converged        # still flagged (rule 9)
+    assert second.gpu_seconds == 0.0 and second.result.get("from_cache") is True
+    assert ResultCache(cache_dir).get(first.cache_key) is None                 # never served as evidence
+    assert budget.spent.compute_units == 8.0                                   # both charged
+    assert [r["status"] for r in read_log(run_dir)] == ["not_converged", "not_converged"]
 
 
 class RaisingBackend:
