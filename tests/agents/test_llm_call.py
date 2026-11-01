@@ -96,3 +96,43 @@ def test_gemini_counts_thinking_tokens_as_output(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(google.genai, "Client", Client)
     assert base._gemini("hi", "", cfg("gemini-3.8-flash")) == ("ok", 12, 43)
     assert list(base._GEMINI_CLIENTS) == ["test-key"]      # the client is kept for the next call
+
+
+def test_temporary_provider_errors_are_retried_with_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls, waits = [], []
+    def flaky(prompt, system, config):
+        calls.append(1)
+        if len(calls) < 3:
+            raise LLMUnavailable("Gemini call failed: GEMINI_API_KEY: 503 UNAVAILABLE. The model is overloaded.")
+        return "ok", 10, 5
+    monkeypatch.setattr(base, "_gemini", flaky)
+    monkeypatch.setattr(base, "_sleep", waits.append)
+    reply = llm_call("hi", Budget(cfg("gemini-3.8-flash")), cfg("gemini-3.8-flash"))
+    assert reply.text == "ok" and len(calls) == 3 and len(waits) == 2 and waits[1] > waits[0]
+
+
+@pytest.mark.parametrize("message", ["Gemini call failed: set GEMINI_API_KEY or GEMINI_API_KEY_2",
+                                     "Gemini call failed: GEMINI_API_KEY: 404 model not found",
+                                     "set ANTHROPIC_API_KEY in the environment"])
+def test_permanent_errors_fail_at_once(monkeypatch: pytest.MonkeyPatch, message: str) -> None:
+    calls = []
+    def broken(prompt, system, config):
+        calls.append(1)
+        raise LLMUnavailable(message)
+    monkeypatch.setattr(base, "_gemini", broken)
+    monkeypatch.setattr(base, "_sleep", lambda s: None)
+    with pytest.raises(LLMUnavailable):
+        llm_call("hi", Budget(cfg("gemini-3.8-flash")), cfg("gemini-3.8-flash"))
+    assert len(calls) == 1
+
+
+def test_retries_give_up_after_the_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+    def down(prompt, system, config):
+        calls.append(1)
+        raise LLMUnavailable("Gemini call failed: 429 RESOURCE_EXHAUSTED")
+    monkeypatch.setattr(base, "_gemini", down)
+    monkeypatch.setattr(base, "_sleep", lambda s: None)
+    with pytest.raises(LLMUnavailable):
+        llm_call("hi", Budget(cfg("gemini-3.8-flash")), cfg("gemini-3.8-flash"))
+    assert len(calls) == base.RETRIES + 1
