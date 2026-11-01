@@ -55,7 +55,7 @@ H100 run with the NVIDIA ALCHEMI Toolkit, on the **301 held-out pairs that every
 - **The first GB10 run silently used the stub compute backend** (`KILN_COMPUTE_BACKEND` defaulted to `stub`). We found it from the compute logs (`"model": "stub"`), not from the scores, and declared it invalid in `protocol/amendments.md` before scoring the H100 run. The runners now fail closed on a stub or unset backend, and the app refuses to show stub runs. The invalid run is kept, byte-exact, in `stub-invalid-20261101/`.
 - A GB10 (DGX Spark) rerun with real compute has all three C1 seeds complete; C2–C4 are still running (`runs/`).
 
-**App:** `app/` is an interactive triage app that replays any recorded held-out pair step by step: agent decisions, GPU calculations, convergence, and the result with review flags. Deployment: `docs/deploy.md`.
+**App (live): http://81.85.1.97/** — `app/` is an interactive triage app that replays any recorded held-out pair step by step: agent decisions, GPU calculations, convergence, and the result with review flags. Deployment: `docs/deploy.md`.
 
 ## Data and license
 
