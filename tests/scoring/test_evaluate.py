@@ -1,12 +1,14 @@
+import csv
 import hashlib
 import json
 import math
+from pathlib import Path
 
 import pytest
 
 from kiln.schemas import Category, ComputeRequest, Item, Label, Prediction, ReviewFlag, ReviewReason
 from kiln.scoring.evaluate import (
-    HARD_SUBSET_FORMULA_RULES,
+    HARD_SUBSET_FORMULA_LIST,
     EvaluationLockedError,
     evaluate,
     formula_triggers,
@@ -73,7 +75,7 @@ def test_snapshot_metrics_and_compute_allocation(tmp_path):
         {"category": "partially_reacted", "support": 1, "predicted": 0, "f1": 0.0},
         {"category": "completely_reacted", "support": 1, "predicted": 1, "f1": 0.0},
     ]
-    assert metrics == {"n": 4, "auroc": 0.875, "four_class_accuracy": 0.5, "four_class_macro_f1": 0.25, "brier": pytest.approx(0.1425), "coverage": 0.75, "flagged_accuracy": 0.0, "unflagged_accuracy": pytest.approx(2/3), "flagged_n": 1, "unflagged_n": 3}
+    assert metrics == {"n": 4, "n_scored": 4, "n_unclassified_or_null": 0, "auroc": 0.875, "four_class_accuracy": 0.5, "four_class_macro_f1": 0.25, "brier": pytest.approx(0.1425), "coverage": 0.75, "flagged_accuracy": 0.0, "unflagged_accuracy": pytest.approx(2/3), "flagged_n": 1, "unflagged_n": 3}
     assert result["compute_requests"][0].moved_toward_label is True
     assert logged.moved_toward_label is None
     assert result["compute_allocation"][0]["compute_units"] == 2
@@ -85,7 +87,7 @@ def test_secondary_split_counts_only_completely_reacted_and_leaves_primary_uncha
     path, items, labels = fixture(tmp_path)
     result = evaluate(path, items, lambda: labels, verify_posted_hash=lambda digest: True)
     # Only c is completely reacted (score 0.4); a (0.8, partially reacted) now counts as not reacted.
-    assert result["secondary_binary_split"] == {"reacted_means": "completely_reacted only", "n": 4, "n_reacted": 1,
+    assert result["secondary_binary_split"] == {"reacted_means": "completely_reacted only", "n": 4, "n_scored": 4, "n_reacted": 1,
                                                 "auroc": 0.5, "brier": pytest.approx(1.17 / 4)}
     assert result["metrics"]["auroc"] == 0.875 and result["metrics"]["brier"] == pytest.approx(0.1425)
 
@@ -228,15 +230,15 @@ def test_hard_subset_buckets_every_item_and_reports_the_same_metrics(tmp_path):
     assert sum(hard_subset[bucket]["n"] for bucket in ("hard", "easy", "unknown")) == 4
     hard = dict(hard_subset["hard"])
     hard.pop("four_class_f1")
-    assert hard == {"n": 2, "auroc": 1.0, "four_class_accuracy": 0.5, "four_class_macro_f1": None, "brier": pytest.approx(0.1),
+    assert hard == {"n": 2, "n_scored": 2, "n_unclassified_or_null": 0, "auroc": 1.0, "four_class_accuracy": 0.5, "four_class_macro_f1": None, "brier": pytest.approx(0.1),
                     "coverage": 0.5, "flagged_accuracy": 0.0, "unflagged_accuracy": 1.0, "flagged_n": 1, "unflagged_n": 1}
     easy = dict(hard_subset["easy"])
     easy.pop("four_class_f1")
-    assert easy == {"n": 1, "auroc": None, "four_class_accuracy": 0.0, "four_class_macro_f1": None, "brier": pytest.approx(0.36),
+    assert easy == {"n": 1, "n_scored": 1, "n_unclassified_or_null": 0, "auroc": None, "four_class_accuracy": 0.0, "four_class_macro_f1": None, "brier": pytest.approx(0.36),
                     "coverage": 1.0, "flagged_accuracy": None, "unflagged_accuracy": 0.0, "flagged_n": 0, "unflagged_n": 1}
     unknown = dict(hard_subset["unknown"])
     unknown.pop("four_class_f1")
-    assert unknown == {"n": 1, "auroc": None, "four_class_accuracy": 1.0, "four_class_macro_f1": None, "brier": pytest.approx(0.01),
+    assert unknown == {"n": 1, "n_scored": 1, "n_unclassified_or_null": 0, "auroc": None, "four_class_accuracy": 1.0, "four_class_macro_f1": None, "brier": pytest.approx(0.01),
                        "coverage": 1.0, "flagged_accuracy": None, "unflagged_accuracy": 1.0, "flagged_n": 0, "unflagged_n": 1}
     assert set(hard_subset["hard"]) == set(result["metrics"])
     assert hard_subset["trigger_counts"] == {"margin_below_threshold": 1, "carbonate": 1, "hydroxide": 0, "ammonium": 0}
@@ -244,10 +246,10 @@ def test_hard_subset_buckets_every_item_and_reports_the_same_metrics(tmp_path):
     assert hard_subset["formula_triggers"]["Li2CO3"] == ["carbonate"]
     assert set(hard_subset["formula_triggers"]) == {f for item in items for f in (item.precursor_a, item.precursor_b)}
     assert hard_subset["definition"]["margin_threshold_ev_per_atom"] == THRESHOLD
-    assert hard_subset["definition"]["formula_rules"] == dict(HARD_SUBSET_FORMULA_RULES)
+    assert hard_subset["definition"]["formula_list"] == dict(HARD_SUBSET_FORMULA_LIST)
     assert hard_subset["definition_sha256"] == hard_subset_definition_sha256(items, margins, THRESHOLD)
     assert "verified as posted" in hard_subset["definition"]["commitment"]
-    assert hard_subset["definition"]["version"] == "kiln.hard_subset.v1"
+    assert hard_subset["definition"]["version"] == "kiln.hard_subset.v2"
 
 
 def test_hard_subset_leaves_all_pairs_results_unchanged(tmp_path):
@@ -338,8 +340,8 @@ def test_margin_threshold_boundary_is_strict(tmp_path):
     assert buckets == {"a": "hard", "b": "easy", "c": "hard", "d": "unknown"}
 
 
-def test_formula_rule_makes_an_unknown_margin_hard_and_either_precursor_counts(tmp_path):
-    formulas = {"a": ("Mg(OH)2", "SynA"), "b": ("SynB", "NH4H2PO4"), "c": ("Cu2(OH)2CO3", "SynC"), "d": ("SynD", "SynE")}
+def test_listed_formula_makes_an_unknown_margin_hard_and_either_precursor_counts(tmp_path):
+    formulas = {"a": ("La(HO)3", "SynA"), "b": ("SynB", "PH6NO4"), "c": ("K4H6C2O9", "LiH3O2"), "d": ("SynD", "SynE")}
     path, items, labels, margins = hard_fixture(tmp_path, formulas)
     margins.update(a=None, b=None, c=None)
     hard_subset = run_hard(path, items, labels, margins)["hard_subset"]
@@ -353,8 +355,35 @@ def test_formula_rule_makes_an_unknown_margin_hard_and_either_precursor_counts(t
     assert hard_subset["easy"]["n"] == 0
     assert hard_subset["unknown"]["n"] == 1
     assert hard_subset["hard_with_unknown_margin"] == 3
-    # A mixed-anion item counts once in the bucket and once under each trigger.
+    # An item with two listed precursors counts once in the bucket and once under each group.
     assert hard_subset["trigger_counts"] == {"margin_below_threshold": 0, "carbonate": 1, "hydroxide": 2, "ammonium": 1}
+
+
+def test_formulas_the_regexes_misread_are_bucketed_by_the_list(tmp_path):
+    # Protocol §4.3 (OPEN-26): the v1 regexes missed pymatgen-style listed
+    # formulas and matched iron(II) oxalate (FeH4(CO3)2); the list decides.
+    formulas = {"a": ("Al(HO)3", "SynA"), "b": ("SynB", "PH9(NO2)2"), "c": ("FeH4(CO3)2", "SynC"), "d": ("B(HO)3", "KP(HO2)2")}
+    path, items, labels, margins = hard_fixture(tmp_path, formulas)
+    margins.update(a=0.5, b=0.5, c=0.5, d=0.5)
+    assignments = run_hard(path, items, labels, margins)["hard_subset"]["assignments"]
+    assert [(a["item_id"], a["bucket"], a["triggers"]) for a in assignments] == [
+        ("a", "hard", ["hydroxide"]),
+        ("b", "hard", ["ammonium"]),
+        ("c", "easy", []),
+        ("d", "easy", []),
+    ]
+
+
+def test_changing_the_formula_list_changes_the_definition_digest(tmp_path, monkeypatch):
+    from types import MappingProxyType
+
+    import kiln.scoring.evaluate as module
+
+    _, items, _, margins = hard_fixture(tmp_path)
+    digest = hard_subset_definition_sha256(items, margins, THRESHOLD)
+    monkeypatch.setattr(module, "HARD_SUBSET_FORMULA_LIST",
+                        MappingProxyType({**HARD_SUBSET_FORMULA_LIST, "FeH4(CO3)2": "carbonate"}))
+    assert hard_subset_definition_sha256(items, margins, THRESHOLD) != digest
 
 
 def test_margin_and_formula_triggers_are_both_recorded(tmp_path):
@@ -428,72 +457,64 @@ def test_margins_must_be_a_mapping(tmp_path):
                  hard_subset_margins=list(margins.items()), hard_subset_margin_threshold_ev_per_atom=THRESHOLD)
 
 
+# The list exactly as protocol §4.3 writes it (OPEN-26), in ledger notation.
+PROTOCOL_FORMULA_LIST = {
+    "BaCO3": "carbonate", "CaCO3": "carbonate", "Li2CO3": "carbonate", "Na2CO3": "carbonate",
+    "SrCO3": "carbonate", "K4H6C2O9": "carbonate",
+    "Al(HO)3": "hydroxide", "La(HO)3": "hydroxide", "LiH3O2": "hydroxide",
+    "PH6NO4": "ammonium", "PH9(NO2)2": "ammonium",
+}
+NOT_ON_LIST = ("FeH4(CO3)2", "B(HO)3", "KP(HO2)2")  # protocol §4.3, named as deliberately excluded
+
+
+def test_formula_list_is_the_protocol_list():
+    assert dict(HARD_SUBSET_FORMULA_LIST) == PROTOCOL_FORMULA_LIST
+    assert len(HARD_SUBSET_FORMULA_LIST) == 11
+    assert not set(NOT_ON_LIST) & set(HARD_SUBSET_FORMULA_LIST)
+
+
+def test_formula_list_uses_the_ledger_notation_of_the_precursor_table():
+    # data/precursor_props.csv holds the 46 precursor formulas in the notation
+    # kiln.data copies into Item (agent-visible data, no labels). Every listed
+    # formula, and every formula the protocol deliberately leaves off, must be
+    # spelled exactly as there, or exact matching would silently miss it.
+    table = Path(__file__).resolve().parents[2] / "data" / "precursor_props.csv"
+    with table.open(newline="", encoding="utf-8") as stream:
+        formulas = {row["formula"] for row in csv.DictReader(stream)}
+    assert len(formulas) == 46
+    assert set(HARD_SUBSET_FORMULA_LIST) <= formulas
+    assert set(NOT_ON_LIST) <= formulas
+
+
 @pytest.mark.parametrize("formula, expected", [
-    # carbonate
-    ("Li2CO3", ("carbonate",)),
-    ("La2(CO3)3", ("carbonate",)),
-    ("Bi2O2CO3", ("carbonate",)),
-    ("NaHCO3", ("carbonate",)),              # bicarbonate counts as carbonate, not hydroxide
-    ("KHCO3", ("carbonate",)),
-    ("Co3O4", ()),                          # cobalt: case-sensitive, Co is not C + O
-    ("CaC2O4", ()),                         # oxalate is not carbonate
-    ("Mn(CH3COO)2", ()),                    # acetate is not carbonate or hydroxide
-    ("CaC2", ()),
-    # hydroxide
-    ("LiOH", ("hydroxide",)),
-    ("Mg(OH)2", ("hydroxide",)),
-    ("Mg[OH]2", ("hydroxide",)),
-    ("FeOOH", ("hydroxide",)),              # oxyhydroxide counts
-    ("FeO(OH)", ("hydroxide",)),
+    *[(formula, (group,)) for formula, group in PROTOCOL_FORMULA_LIST.items()],
+    # deliberately off the list (protocol §4.3)
+    ("FeH4(CO3)2", ()),                     # iron(II) oxalate dihydrate: the v1 CO3 regex matched it
+    ("B(HO)3", ()),                         # boric acid
+    ("KP(HO2)2", ()),                       # KH2PO4
+    # other ledger formulas
+    ("Co3O4", ()),
     ("HfO2", ()),
-    ("Ho2O3", ()),
-    ("SrOHfO2", ()),                        # O then Hf (hafnium) is not hydroxide
-    ("OsO4", ()),
-    # hydrates: water of crystallization never triggers a rule
-    ("LiOH·H2O", ("hydroxide",)),
-    ("Mg(NO3)2·6H2O", ()),
-    ("Ni(NO3)2.6H2O", ()),
-    ("CuSO4*5H2O", ()),
-    ("Na2CO3·10H2O", ("carbonate",)),
-    ("(NH4)6Mo7O24·4H2O", ("ammonium",)),
-    ("H2O", ()),
-    # ammonium
-    ("NH4Cl", ("ammonium",)),
-    ("[NH4]Cl", ("ammonium",)),
-    ("NH4H2PO4", ("ammonium",)),
-    ("(NH4)2HPO4", ("ammonium",)),
-    ("NH4VO3", ("ammonium",)),
-    ("NH3", ()),
-    ("N2H4", ()),                           # hydrazine
-    ("N(CH3)4Cl", ()),                      # substituted ammonium is not matched
-    ("NiO", ()),
-    ("Nb2O5", ()),
-    ("NaH2PO4", ()),                        # acid salt hydrogen is not hydroxide
-    # mixed anions: every matching rule is reported
-    ("Cu2(OH)2CO3", ("carbonate", "hydroxide")),
-    ("Ca10(PO4)6(OH)2", ("hydroxide",)),
-    ("NH4HCO3", ("carbonate", "ammonium")),
-    ("(NH4)2CO3", ("carbonate", "ammonium")),
-    # Unicode subscripts are read as digits; matching is case-sensitive
-    ("Li₂CO₃", ("carbonate",)),
-    ("Mg(OH)₂", ("hydroxide",)),
-    ("NH₄Cl", ("ammonium",)),
+    ("MnO2", ()),
+    # exact string match: conventional notation, case, whitespace and subscripts are not normalized
+    ("Al(OH)3", ()),
+    ("LiOH·H2O", ()),
+    ("NH4H2PO4", ()),
+    ("(NH4)2HPO4", ()),
+    ("K2CO3", ()),
+    ("Mg(OH)2", ()),
     ("li2co3", ()),
-    # Known limits, pinned so any change is deliberate (see PR decisions):
-    ("VOHPO4", ("hydroxide",)),             # false positive: O directly before an acid-salt H
-    ("B(OH)3", ("hydroxide",)),             # same compound as H3BO3, which matches nothing
-    ("H3BO3", ()),
-    ("LiHO", ()),                           # pymatgen reduced_formula notation is not recognised
-    ("Mg(HO)2", ()),
-    ("H4NCl", ()),
-    ("Cu2H2CO5", ()),
+    (" Li2CO3", ()),
+    ("Li2CO3 ", ()),
+    ("Li₂CO₃", ()),
+    ("", ()),
 ])
-def test_formula_rule_edge_cases(formula, expected):
+def test_formula_list_membership(formula, expected):
     assert formula_triggers(formula) == expected
 
 
-def test_formula_rules_read_text_only():
+def test_formula_list_reads_text_only_and_is_read_only():
     with pytest.raises(TypeError):
         formula_triggers(None)
     with pytest.raises(TypeError):
-        HARD_SUBSET_FORMULA_RULES["carbonate"] = "C"
+        HARD_SUBSET_FORMULA_LIST["MgO"] = "hydroxide"
