@@ -2,6 +2,7 @@
 
 import json
 import importlib.util
+import pytest
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,7 +18,7 @@ from kiln.compute.backends import StubBackend
 from kiln.compute.cache import ResultCache
 from kiln.compute.client import ComputeClient, use
 from kiln.review import flags
-from kiln.schemas import Category, ComputeRequest, ComputeTier, Item, RunConfig, VerifierStatus
+from kiln.schemas import Artifact, Category, ComputeRequest, ComputeTier, Item, RunConfig, VerifierStatus
 from kiln.scoring.rules import EvidenceSource, Feature, LinearScore, Outcome, ScoringRules, Term
 from kiln.scoring.score import ScoringEngine
 from kiln.verifier import verify
@@ -154,6 +155,117 @@ def test_model_skip_overrides_recommendation_and_charges_tokens(tmp_path, monkey
     assert all(not a.compute_requests for a in artifacts)
     accepted = [a.model_copy(update={"verifier": VerifierStatus.accepted}) for a in artifacts]
     assert any(f.reason.value == "missing_evidence" for f in flags(item, accepted, []))
+
+
+def test_thermo_logs_model_override_explanation_and_its_cost(tmp_path, monkeypatch):
+    run = tmp_path / "explanation"
+    run.mkdir()
+    cfg = RunConfig(run_id="explanation", condition="C4", seed=1, model="gemini-3.8-flash")
+    budget = Budget(cfg)
+    board = Board(run)
+    monkeypatch.setattr(thermo_module, "llm_choose", lambda *args, **kwargs: ["skip"])
+
+    def explain(prompt, actual_budget, config, **kwargs):
+        actual_budget.charge_tokens(4, 3)
+        return SimpleNamespace(text="The budget is better reserved for later evidence.")
+
+    monkeypatch.setattr(thermo_module, "llm_call", explain)
+    item = Item(item_id="example", source="alab_demo", precursor_a="CaCO3", precursor_b="TiO2",
+                temperature_c=900, split="dev")
+    Thermo(config=cfg).step(item, board, budget)
+    artifact = board.artifacts(item.item_id)[0]
+    assert "Model explanation (post-hoc): The budget is better reserved" in artifact.rationale
+    assert artifact.cost.tokens_in == 4 and artifact.cost.tokens_out == 3
+
+
+@pytest.mark.parametrize("energy,hull,latest,delta,expected", [
+    (0.0, None, "cached_lookup", None, "skip"),
+    (-0.05, None, "cached_lookup", None, "single_point"),
+    (-0.05001, None, "cached_lookup", None, "skip"),
+    (0.0, 0.1, "cached_lookup", None, "single_point"),
+    (0.0, 0.10001, "cached_lookup", None, "skip"),
+    (0.0, 0.0, "cached_lookup", None, "skip"),
+    (0.0, 0.04, "single_point", 0.0, "bounded_relaxation"),
+    (0.0, None, "single_point", 0.05, "skip"),
+    (0.0, None, "single_point", 0.05001, "bounded_relaxation"),
+])
+def test_thermo_escalation_recommendation_boundaries(tmp_path, monkeypatch, energy, hull, latest, delta, expected):
+    run = tmp_path / "boundary"
+    run.mkdir()
+    cfg = RunConfig(run_id="boundary", condition="C4", seed=1, model="offline")
+    board = Board(run)
+    item = Item(item_id="example", source="alab_demo", precursor_a="CaCO3", precursor_b="TiO2",
+                temperature_c=900, split="dev")
+    board.post_artifact(Artifact(artifact_id="lookup", run_id=cfg.run_id, item_id=item.item_id,
+        agent="thermo", type="reaction_report", verifier=VerifierStatus.accepted,
+        values={"compute_tier": "cached_lookup", "dE_ev_per_atom": energy,
+                "competitor_e_hull_ev_per_atom": hull}))
+    if latest == "single_point":
+        board.post_artifact(Artifact(artifact_id="single", run_id=cfg.run_id, item_id=item.item_id,
+            agent="thermo", type="reaction_report", verifier=VerifierStatus.accepted,
+            values={"compute_tier": "single_point", "dE_ev_per_atom": energy,
+                    "dE_mlip_minus_mp_ev_per_atom": delta}))
+    recommendations = []
+    def choose(options, *args, **kwargs):
+        recommendations.append(options)
+        return ["skip"]
+    monkeypatch.setattr(thermo_module, "llm_choose", choose)
+    Thermo(config=cfg, energy_margin_ev_per_atom=0.05,
+           disagreement_threshold_ev_per_atom=0.05).step(item, board, Budget(cfg))
+    assert recommendations[0][0] == expected
+    if energy == 0 and expected == "skip":
+        assert recommendations == [["skip"]]
+
+
+def test_kinetics_does_not_offer_zero_energy_escalation(tmp_path, monkeypatch):
+    run = tmp_path / "zero"
+    run.mkdir()
+    cfg = RunConfig(run_id="zero", condition="C4", seed=1, model="offline")
+    board = Board(run)
+    item = Item(item_id="example", source="alab_demo", precursor_a="CaCO3", precursor_b="TiO2",
+                temperature_c=900, split="dev")
+    board.post_artifact(Artifact(artifact_id="temperature", run_id=cfg.run_id, item_id=item.item_id,
+        agent="kinetics", type="kinetics_report", verifier=VerifierStatus.accepted, values={}))
+    board.post_artifact(Artifact(artifact_id="energy", run_id=cfg.run_id, item_id=item.item_id,
+        agent="thermo", type="reaction_report", verifier=VerifierStatus.accepted,
+        values={"dE_ev_per_atom": 0.0}))
+    choices = []
+    def choose(options, *args, **kwargs):
+        choices.append(options)
+        return ["skip"]
+    monkeypatch.setattr(kinetics_module, "llm_choose", choose)
+    Kinetics(config=cfg, energy_margin_ev_per_atom=0.05).step(item, board, Budget(cfg))
+    assert choices == [["skip"]]
+    assert not board.needs(item.item_id)
+
+
+def test_lookup_competitor_is_copied_into_verifiable_artifact(tmp_path):
+    run = tmp_path / "hull"
+    run.mkdir()
+    cfg = RunConfig(run_id="hull", condition="C4", seed=1, model="offline",
+                    tier_prices={"cached_lookup": 1.0})
+    budget = Budget(cfg)
+    board = Board(run)
+    compute = StubCompute(run, cfg.tier_prices)
+    original = compute.request
+
+    def request(*args, **kwargs):
+        record = original(*args, **kwargs)
+        result = {**record.result, "competitor_e_hull_ev_per_atom": 0.04,
+                  "competitor_e_hull_status": "ok"}
+        updated = record.model_copy(update={"result": result})
+        compute.log_path.write_text(updated.model_dump_json() + "\n", encoding="utf-8")
+        return updated
+
+    compute.request = request
+    item = Item(item_id="example", source="alab_demo", precursor_a="CaCO3", precursor_b="TiO2",
+                temperature_c=900, split="dev")
+    Thermo(compute, config=cfg, energy_margin_ev_per_atom=0.05).step(item, board, budget)
+    artifact = board.artifacts(item.item_id)[0]
+    lookup = ComputeRequest.model_validate_json(compute.log_path.read_text(encoding="utf-8"))
+    assert artifact.values["competitor_e_hull_ev_per_atom"] == 0.04
+    status, notes = verify(artifact, board, requests=[lookup], config=cfg, item_cost=budget.spent, tool_values={})
+    assert status == VerifierStatus.accepted, notes
 
 
 def test_model_can_request_recheck_despite_rule_recommending_skip(tmp_path, monkeypatch):

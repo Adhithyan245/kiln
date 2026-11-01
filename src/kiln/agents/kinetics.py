@@ -76,8 +76,9 @@ class Kinetics(Agent):
             value = a.values.get("dE_ev_per_atom")
             if a.agent == "thermo" and isinstance(value, (float, int)) and not isinstance(value, bool):
                 before = budget.spent
-                recommended = "firm_up_energy" if abs(value) <= self.energy_margin else "skip"
-                options = [recommended, "skip" if recommended != "skip" else "firm_up_energy"]
+                recommended = "firm_up_energy" if 0 < abs(value) <= self.energy_margin else "skip"
+                options = (["skip"] if value == 0 else
+                           [recommended, "skip" if recommended != "skip" else "firm_up_energy"])
                 chosen = llm_choose(options, f"Rule recommends {recommended}; energy is {value} eV/atom. "
                     f"Remaining budget: {budget.remaining()}.", budget, config,
                     system="Choose an action; never supply numerical evidence.")

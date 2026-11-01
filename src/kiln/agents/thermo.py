@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import math
 
-from kiln.agents.base import Agent, llm_choose
+from kiln.agents.base import Agent, llm_call, llm_choose
 from kiln.board import Board
 from kiln.budget import Budget
 from kiln.compute import client
 from kiln.schemas import Artifact, Claim, ComputeStatus, ComputeTier, Cost, Item, RunConfig
+
+HULL_WINDOW_EV_PER_ATOM = 0.1
 
 
 class Thermo(Agent):
@@ -38,8 +40,10 @@ class Thermo(Agent):
         needs = board.open_needs(item.item_id, ("firm_up_energy", "reaction_energy"))
         need = needs[0] if needs else None
         inputs = {"precursor_a": item.precursor_a, "precursor_b": item.precursor_b}
+        zero_without_other_trigger = False
         observed = [{"tier": a.values.get("compute_tier"), "dE_ev_per_atom": a.values.get("dE_ev_per_atom"),
-                     "dE_mlip_minus_mp_ev_per_atom": a.values.get("dE_mlip_minus_mp_ev_per_atom")}
+                     "dE_mlip_minus_mp_ev_per_atom": a.values.get("dE_mlip_minus_mp_ev_per_atom"),
+                     "competitor_e_hull_ev_per_atom": a.values.get("competitor_e_hull_ev_per_atom")}
                     for a in board.accepted_artifacts(item.item_id) if a.agent == self.name]
         if need is not None:
             if need.type == "firm_up_energy" and self.energy_margin is None:
@@ -61,16 +65,25 @@ class Thermo(Agent):
             last = accepted[-1]
             energy = last.values.get("dE_ev_per_atom")
             delta = last.values.get("dE_mlip_minus_mp_ev_per_atom")
-            borderline = self.energy_margin is not None and isinstance(energy, (float, int)) and abs(energy) <= self.energy_margin
+            borderline = (self.energy_margin is not None and isinstance(energy, (float, int))
+                          and not isinstance(energy, bool) and 0 < abs(energy) <= self.energy_margin)
             conflict = self.disagreement_threshold is not None and isinstance(delta, (float, int)) and abs(delta) > self.disagreement_threshold
-            if last.values.get("compute_tier") == "cached_lookup" and borderline and not any(
+            # The competitor is supplied by the accepted lookup, not the MLIP tier.
+            hull = next((a.values.get("competitor_e_hull_ev_per_atom") for a in reversed(accepted)
+                         if a.values.get("compute_tier") == "cached_lookup"
+                         and a.values.get("competitor_e_hull_ev_per_atom") is not None), None)
+            near_hull = (isinstance(hull, (int, float)) and not isinstance(hull, bool)
+                         and 0 < hull <= HULL_WINDOW_EV_PER_ATOM)
+            zero_without_other_trigger = (isinstance(energy, (int, float)) and not isinstance(energy, bool)
+                                          and energy == 0 and not near_hull and not conflict)
+            if last.values.get("compute_tier") == "cached_lookup" and (borderline or near_hull) and not any(
                     a.values.get("compute_tier") == "single_point" for a in previous):
                 tier = ComputeTier.single_point
-                reason = "The cached reaction energy is within the configured borderline margin."
-            elif last.values.get("compute_tier") == "single_point" and (borderline or conflict) and not any(
+                reason = "The cached reaction energy is borderline or an off-hull competitor is near the hull."
+            elif last.values.get("compute_tier") == "single_point" and (borderline or near_hull or conflict) and not any(
                     a.values.get("compute_tier") == "bounded_relaxation" for a in previous):
                 tier = ComputeTier.bounded_relaxation
-                reason = "The single-point estimate remains borderline or conflicts with cached energy."
+                reason = "Evidence remains borderline, a competitor is near the hull, or energy methods conflict."
             else:
                 if last.values.get("compute_tier") == "cached_lookup" and self.energy_margin is not None:
                     tier = ComputeTier.single_point
@@ -85,6 +98,8 @@ class Thermo(Agent):
             reason = "Start with the cached thermodynamic reaction estimate."
         recommended = "skip" if reason.startswith("The rule does not recommend") else tier.value
         options = [recommended, "skip" if recommended != "skip" else tier.value]
+        if recommended == "skip" and zero_without_other_trigger:
+            options = ["skip"]
         context = (f"Thermo for {item.precursor_a} and {item.precursor_b} at {item.temperature_c} C. "
                    f"Accepted evidence: {observed}. Rule recommendation: {recommended}. {reason} "
                    f"Remaining budget: {budget.remaining()}.")
@@ -93,6 +108,21 @@ class Thermo(Agent):
             raise ValueError("Thermo model returned no valid action")
         action = chosen[0]
         reason = f"Rule recommended {recommended}; model chose {action}. {reason}"
+        if action != recommended:
+            # This is a separate, budgeted call: it is the model's post-hoc explanation,
+            # not a verbatim record of its internal decision-making.
+            if config.model == "offline":
+                explanation = "Offline test model selected an alternative action."
+            else:
+                reply = llm_call(
+                    f"{context}\nThe recommended action was {recommended}; you selected {action}. "
+                    "In one sentence, explain that choice. Do not invent evidence.",
+                    budget, config, system="Explain the selected action using only the supplied context.",
+                )
+                explanation = reply.text.strip()
+                if not explanation:
+                    raise ValueError("Thermo model returned no override explanation")
+            reason += f" Model explanation (post-hoc): {explanation}"
         if need is not None and not board.claim(need.need_id, self.name):
             return
         if action == "skip":
@@ -113,7 +143,9 @@ class Thermo(Agent):
             raise
         values = {"compute_tier": tier.value}
         if request.status in (ComputeStatus.ok, ComputeStatus.cached):
-            for key in ("dE_ev_per_atom", "dE_mlip_minus_mp_ev_per_atom"):
+            for key in ("dE_ev_per_atom", "dE_mlip_minus_mp_ev_per_atom", "competitor_e_hull_ev_per_atom"):
+                if key == "competitor_e_hull_ev_per_atom" and request.result.get("competitor_e_hull_status") != "ok":
+                    continue
                 if request.result.get(key) is not None:
                     values[key] = request.result[key]
         spent = budget.spent
