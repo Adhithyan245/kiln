@@ -30,7 +30,7 @@ def test_app_escapes_output_and_sorts_flags(tmp_path, monkeypatch):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     monkeypatch.setattr(module, "ROOT", tmp_path)
-    out = tmp_path / "runs" / "example"
+    out = tmp_path / "runs-h100" / "example"
     out.mkdir(parents=True)
     rows = [{"item_id": "ordinary", "needs_review": False},
             {"item_id": "<script>", "needs_review": True}]

@@ -42,11 +42,22 @@ H100 run with the NVIDIA ALCHEMI Toolkit, on the **301 held-out pairs that every
 | C3 central planner | 0.722 | 0.170 | 0.383 | 2,598 |
 | **C4 collective** | **0.726** | **0.168** | 0.386 | 4,352 |
 
+**Full run, all 346 held-out pairs** (reported separately, as declared in `protocol/amendments.md`; never pooled with the table above). The run finished at 16:58 UTC with every pair predicted by its run (none filled in by `finalize`); predictions hash `cf6699f7…` posted to #kiln-receipts as message `1566496777790554284` before grading and checked against Discord by the scorer. Mean of 3 seeds; 335 of 346 pairs have a scoreable outcome:
+
+| Condition | AUROC | Brier ↓ | 4-class accuracy | 4-class macro-F1 | Compute units per run | GPU-seconds per run |
+|---|---|---|---|---|---|---|
+| C1 single agent | 0.728 | 0.182 | 0.388 | 0.180 | 63 | 72 |
+| C2 isolated specialists | 0.739 | 0.177 | 0.388 | 0.186 | 5,135 | 9,364 |
+| C3 central planner | 0.736 | 0.178 | 0.386 | 0.181 | 2,909 | 6,066 |
+| **C4 collective** | **0.739** | **0.177** | 0.388 | 0.186 | 5,135 | 6,829 |
+
+ΔAUROC(C4 − C1) on the full set is **+0.011** (seeds +0.012, +0.012, +0.010), the same sign and size as the declared result above. Both tables agree; neither has a confidence interval.
+
 **What it means:**
 - C4 and C2 are identical, so coordination through the need board changed no decisions.
-- The specialist conditions bought about 80× more GPU compute than the single agent (they escalated about 69% of pairs to MACE relaxations, against about 5% for C1) for a small AUROC gain. **The single agent reaches about 98% of the AUROC at about 1% of the compute.**
-- Four-class accuracy is about 0.39 against 0.25 for chance.
-- Scores and logs: `results-h100-cut/`, `runs-h100-cut/`.
+- The specialist conditions spent about 80× the compute units of the single agent (C2 and C4 ran a MACE relaxation on 47% of pairs and a single point on 51%; C1 ran a relaxation on none and a single point on 6%) for a small AUROC gain. **The single agent reaches about 98% of the AUROC at about 1% of the compute.** GPU-seconds differ between C2 and C4 only because later runs reused cached calculations; the charged compute units are identical.
+- Four-class accuracy (about 0.39) is **below** always answering "unreacted" (about 0.41 to 0.42, since that is the most common outcome), and macro-F1 is about 0.18: the models mostly predict "unreacted". Use AUROC (ranking) for claims, not the four-class result.
+- Scores and logs: `results-h100-cut/` and `runs-h100-cut/` (declared result), `results-h100/` and `runs-h100/` (full run).
 
 **Integrity: locked before we looked.**
 - The protocol was hashed and posted before any held-out run: Gate P commit `c283468`, `protocol.md` digest `3ca68ee1…`.

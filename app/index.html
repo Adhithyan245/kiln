@@ -1,289 +1,98 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Kiln | Triage</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Manrope:wght@400;600;700&display=swap">
-<style>
-/* Layout: three working columns (prepare -> live triage -> results), stacking to one column on phones. */
-:root {
-  color-scheme: dark;
-  --bg: #0b0d10; --panel: #13161b; --panel-2: #181c22; --line: #252a32; --grid: #1a1e24;
-  --ink: #e8eaed; --muted: #8b94a1; --faint: #5b6370;
-  --accent: #ff7a1a; --accent-2: #ff9a4d;
-  --ok: #34c77b; --warn: #f2b33d; --bad: #f05252; --info: #4f9bff;
-  --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
-  --sans: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
-}
-* { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--ink); font: 400 14px/1.5 var(--sans); }
-.top { display: flex; align-items: center; gap: 18px; height: 54px; border-bottom: 1px solid var(--line); background: #0e1014;
-  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
-.brand { display: flex; align-items: center; gap: 8px; font: 700 18px/1 var(--sans); letter-spacing: .04em; }
-.brand svg { width: 20px; height: 20px; }
-.tab { font: 600 13px/1 var(--mono); color: var(--ink); background: var(--panel-2); border: 1px solid var(--line); padding: 8px 12px; border-radius: 6px; }
-.top .spacer { flex: 1; }
-.live-badge { font: 600 11px/1 var(--mono); letter-spacing: .06em; padding: 6px 9px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
-.live-badge.on { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, transparent); }
-main { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.25fr) minmax(300px, 1.1fr); gap: 16px; padding-block: 18px 32px;
-  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
-@media (max-width: 1080px) { main { grid-template-columns: minmax(0, 1fr); } }
-.col { min-width: 0; display: grid; gap: 12px; align-content: start; }
-.col-title { font: 600 12px/1 var(--mono); letter-spacing: .08em; color: var(--muted); text-transform: uppercase; }
-.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0;
-  background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
-  background-size: 100% 28px, 28px 100%; }
-.panel.plain { background-image: none; }
-.panel h2 { margin: 0 0 10px; font: 700 16px/1.2 var(--sans); }
-.sub { font: 600 11px/1.2 var(--mono); color: var(--faint); letter-spacing: .05em; text-transform: uppercase; margin: 12px 0 6px; }
-label { display: block; font: 500 12px/1.3 var(--sans); color: var(--muted); margin: 0 0 4px; }
-input, select { width: 100%; background: #0f1216; color: var(--ink); border: 1px solid var(--line); border-radius: 7px; padding: 10px 11px; font: 600 15px/1.2 var(--mono); }
-input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.row2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
-.field { display: grid; gap: 4px; margin-bottom: 10px; min-width: 0; }
-.hint { font: 400 12px/1.4 var(--sans); color: var(--muted); min-height: 17px; }
-.hint.warn { color: var(--warn); }
-.run { width: 100%; margin-top: 8px; padding: 14px; border: 0; border-radius: 8px; cursor: pointer; font: 700 15px/1 var(--mono); letter-spacing: .06em;
-  color: #1a0d03; background: linear-gradient(180deg, var(--accent-2), var(--accent)); box-shadow: 0 0 28px color-mix(in srgb, var(--accent) 35%, transparent); }
-.run:disabled { opacity: .55; cursor: progress; }
-.note { font: 400 12px/1.45 var(--sans); color: var(--muted); margin: 10px 0 0; }
-.pill { display: inline-flex; align-items: center; gap: 6px; font: 600 11px/1 var(--mono); letter-spacing: .06em; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); }
-.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-.pill.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 55%, transparent); }
-.pill.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 55%, transparent); }
-.pill.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 55%, transparent); }
-.pill.info { color: var(--info); border-color: color-mix(in srgb, var(--info) 55%, transparent); }
-.head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
-.feed { display: grid; gap: 6px; max-height: 320px; overflow: auto; }
-.ev { display: grid; grid-template-columns: 86px minmax(0, 1fr) auto; gap: 8px; align-items: start; padding: 8px 10px; border-radius: 7px; background: #0f1216; border: 1px solid var(--line); animation: in .35s ease both; }
-.ev .who { font: 600 11px/1.3 var(--mono); text-transform: uppercase; letter-spacing: .05em; color: var(--accent-2); overflow-wrap: anywhere; }
-.ev.compute .who { color: var(--info); }
-.ev .what { font: 400 12.5px/1.45 var(--sans); color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
-.ev .end { font: 600 11px/1.3 var(--mono); color: var(--muted); text-align: right; white-space: nowrap; }
-@keyframes in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-.species { display: flex; flex-wrap: wrap; gap: 6px; }
-.species span { font: 600 13px/1 var(--mono); padding: 7px 9px; border-radius: 6px; background: #0f1216; border: 1px solid var(--line); }
-.empty { color: var(--faint); font: 400 13px/1.5 var(--sans); padding: 18px 4px; text-align: center; }
-svg text { fill: var(--muted); font: 500 10.5px var(--mono); }
-.big { font: 700 22px/1.25 var(--mono); margin: 2px 0 6px; overflow-wrap: anywhere; }
-.kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 14px; font: 400 13px/1.45 var(--sans); }
-.kv dt { color: var(--muted); font: 600 11px/1.6 var(--mono); text-transform: uppercase; letter-spacing: .04em; }
-.kv dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.flags { margin: 6px 0 0; padding-left: 18px; font: 400 12.5px/1.45 var(--sans); color: var(--ink); }
-.flags li { margin-bottom: 4px; }
-.cat { font: 700 18px/1.2 var(--sans); text-transform: capitalize; }
-@media (prefers-reduced-motion: reduce) { .ev { animation: none; } }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Kiln Triage · Recorded evidence</title>
+  <link rel="stylesheet" href="/assets/app.css">
+  <script src="/assets/app.js" defer></script>
 </head>
 <body>
-<header class="top">
-  <div class="brand"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#ff7a1a" d="M12 2c1.2 3.4-.6 5.1-2 6.8C8.6 10.5 7 12.3 7 15a5 5 0 0 0 10 0c0-2.4-1.3-4.2-2.5-5.6.2 1.6-.4 2.9-1.6 3.4.4-3.6-.9-7.6-.9-10.8Z"/></svg>KILN</div>
-  <span class="tab">☰ triage</span>
-  <span class="spacer"></span>
-  <span id="live-badge" class="live-badge">LIVE MODE OFF</span>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="global-header">
+  <a class="brand" href="/" aria-label="Kiln Triage home">
+    <span class="brand-mark" aria-hidden="true">
+      <svg viewBox="0 0 32 32" width="26" height="26"><path d="M6 27V12l10-7.5L26 12v15H6Z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M11 27V15.5a5 5 0 0 1 10 0V27M13.5 20h5M13.5 23.5h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </span>
+    <span>kiln <span class="brand-slash">/</span> <strong>triage</strong> <span class="brand-sub">evidence notebook</span></span>
+  </a>
+  <div class="header-actions">
+    <div id="dataset-switcher" class="dataset-switcher" hidden></div>
+    <span class="label badge-cached"><span class="status-dot" aria-hidden="true"></span>Cached evidence</span>
+    <span class="kbd-hint" title="Shortcuts: Space = Play/Replay trail, [ / ] = Step artifact, J / K = Next/Prev pair"><kbd>Space</kbd> play · <kbd>[</kbd><kbd>]</kbd> step · <kbd>J</kbd><kbd>K</kbd> pair</span>
+    <label for="theme" class="sr-only">Color theme</label>
+    <select id="theme" class="compact-select"><option value="auto">System theme</option><option value="light">Light theme</option><option value="dark">Dark theme</option></select>
+  </div>
 </header>
-<main>
-  <section class="col" aria-labelledby="t1">
-    <div id="t1" class="col-title">01 // Preparation</div>
-    <div class="panel plain">
-      <h2>Precursors</h2>
-      <div class="field"><label for="pa">Precursor A</label><input id="pa" list="formulas" autocomplete="off" placeholder="e.g. CaCO3"></div>
-      <div class="field"><label for="pb">Precursor B</label><input id="pb" list="formulas" autocomplete="off" placeholder="e.g. TiO2"></div>
-      <datalist id="formulas"></datalist>
-      <div id="pair-hint" class="hint"></div>
-      <h2 style="margin-top:14px">Parameters</h2>
-      <div class="row2">
-        <div class="field"><label for="temp">Temperature (°C)</label><input id="temp" type="number" inputmode="decimal" value="900"></div>
-        <div class="field"><label for="dwell">Duration (h)</label><input id="dwell" type="number" inputmode="decimal" value="4"></div>
-      </div>
-      <div class="row2">
-        <div class="field"><label for="cond">Condition</label>
-          <select id="cond"><option value="C4" selected>C4 collective</option><option value="C1">C1 single agent</option><option value="C2">C2 isolated specialists</option><option value="C3">C3 central planner</option></select></div>
-        <div class="field"><label for="seed">Seed</label><select id="seed"><option value="0">0</option><option value="1">1</option><option value="2">2</option></select></div>
-      </div>
-      <button id="run" class="run" type="button">RUN TRIAGE ▶</button>
-      <div id="msg" class="hint" role="status" aria-live="polite"></div>
-      <p class="note">Recorded pairs replay the real Night 2 run step by step. <span id="live-note">Live mode is off on this server, so new pairs can't be run here.</span></p>
+<div class="project-header">
+  <div class="project-title">
+    <div class="eyebrow-row"><span class="eyebrow-pill">Solid-State Synthesis Triage</span><span class="eyebrow-sep">·</span><span class="eyebrow-text">Precursor Genome &amp; A-Lab Protocol</span></div>
+    <h1>From evidence to a lab decision.</h1>
+    <p>Inspect what each specialist found, watch the verifier stamp each fragment on the furnace strip, and audit why Kiln made its recommendation.</p>
+  </div>
+  <div class="project-badges">
+    <span class="label source-label">Retrospective evaluation on public data</span>
+    <div id="header-kpis" class="header-kpis"></div>
+  </div>
+</div>
+<nav class="tabbar" aria-label="Workspace views" role="tablist">
+  <button role="tab" id="tab-overview" aria-controls="view-overview" aria-selected="false" tabindex="-1" data-tab="overview">Overview &amp; Precursors</button>
+  <button role="tab" id="tab-ranked" aria-controls="view-ranked" aria-selected="false" tabindex="-1" data-tab="ranked">Ranked results <span id="record-count" class="counter">0</span></button>
+  <button role="tab" id="tab-trail" aria-controls="view-trail" aria-selected="true" data-tab="trail">Evidence trail</button>
+  <button role="tab" id="tab-quality" aria-controls="view-quality" aria-selected="false" tabindex="-1" data-tab="quality">How good is it?</button>
+</nav>
+
+<main id="main" class="container">
+  <div id="data-status" class="notice"></div>
+  <section id="view-overview" role="tabpanel" aria-labelledby="tab-overview" hidden>
+    <div class="section-heading"><div><h2>A record you can inspect</h2><p>Kiln allocates computation between three specialists under a locked 32.0-unit budget, then produces a proposal from verified evidence.</p></div></div>
+    <div class="overview-grid">
+      <article class="box specialist-card" data-agent="precursor">
+        <div class="specialist-head"><span class="agent-badge agent-precursor">01 · Precursor</span><span class="tier-pill">0.2 u · decomp re-eval</span></div>
+        <h3>Precursor</h3>
+        <p>Checks cited ingredient properties (`data/precursor_props.csv`) and recomputes reaction energies with decomposition products when the furnace exceeds a sourced decomposition point.</p>
+      </article>
+      <article class="box specialist-card" data-agent="thermo">
+        <div class="specialist-head"><span class="agent-badge agent-thermo">02 · Thermo</span><span class="tier-pill">0.1 u → 1.0 u → 30.0 u</span></div>
+        <h3>Thermo</h3>
+        <p>Starts with Materials Project hull lookups and escalates borderline driving forces ($0 &lt; |\Delta E| \le 50\text{ meV/atom}$) or hull competitors to MACE single-point and variable-cell relaxation.</p>
+      </article>
+      <article class="box specialist-card" data-agent="kinetics">
+        <div class="specialist-head"><span class="agent-badge agent-kinetics">03 · Kinetics</span><span class="tier-pill">Tammann ⅔Tₘ rule</span></div>
+        <h3>Kinetics</h3>
+        <p>Compares the furnace setpoint against each precursor’s Tammann onset (⅔Tₘ in K), flags dehydration cautions, and posts `firm_up_energy` needs on the shared board.</p>
+      </article>
     </div>
+    <article class="box flow-box"><h3>How to read an evidence trail</h3><ol class="steps"><li><strong>Inspect a recorded pair</strong><span>Choose an item and the condition (`C1`–`C4`) and seed that produced its assessment.</span></li><li><strong>Play the verifier trail</strong><span>Each segment is one artifact. Accepted evidence heats up; rejected evidence turns striped grey and drops from the verdict; inconclusive evidence stays visibly grey.</span></li><li><strong>Review the proposal</strong><span>Read the cause, suggested fix, cost, thermochemical gauges, sources and limits. Review flags are prompts for a human, not measured outcomes.</span></li></ol></article>
+    <div class="overview-grid two"><article class="box"><h3>The comparison</h3><p>C1 runs a single agent, C2 isolated specialists, C3 a central planner and C4 a coordinating collective. The experiment compares their assessments and compute use at a locked budget.</p><div id="frozen-budget-summary" class="budget-tier-pills"></div></article><article class="box"><h3>Recorded, not running live</h3><p>Playing a trail replays cached records. It never invokes a language model, starts a GPU calculation, or changes the scientific results.</p><a href="/amendments" target="_blank" rel="noopener">Read the run amendment ↗</a></article></div>
+    <article class="box"><div class="box-header"><div><h3>Sourced Precursor &amp; Tammann Reference Explorer</h3><p class="box-sub">46 Precursor Genome reactants with cited melting points, Tammann mobility thresholds, decomposition products, and semantic cautions.</p></div><input id="precursor-search" type="search" class="compact-input" placeholder="Filter formula, product or source…" aria-label="Search precursors"></div><div id="precursor-table" class="table-wrap"></div></article>
   </section>
 
-  <section class="col" aria-labelledby="t2">
-    <div id="t2" class="col-title">02 // Live triage</div>
-    <div class="panel">
-      <div class="head"><h2 style="margin:0">Agent decisions &amp; compute</h2><span id="status" class="pill">IDLE</span></div>
-      <div id="feed" class="feed"><div class="empty">Choose a pair and press Run triage.</div></div>
+  <section id="view-ranked" role="tabpanel" aria-labelledby="tab-ranked" hidden>
+    <div class="section-heading"><div><h2>Ranked results</h2><p>Review-flagged records come first. Search for a recorded item or precursor pair.</p></div><button class="button button-primary" id="export-csv">↓ Export CSV</button></div>
+    <div id="ranked-kpis" class="kpi-strip"></div>
+    <div class="filters">
+      <label class="search-label">Search records<input id="rank-search" type="search" placeholder="Item ID, precursor, cause or run"></label>
+      <label>Review status<select id="rank-filter"><option value="all">All records</option><option value="flagged">Needs review</option><option value="clear">No review flag</option><option value="relaxation">Relaxation requested</option><option value="need-change">Recorded need-linked risk change</option></select></label>
+      <label>Condition<select id="rank-condition-filter"><option value="all">All conditions</option><option value="C1">C1 · Single agent</option><option value="C2">C2 · Isolated specialists</option><option value="C3">C3 · Central planner</option><option value="C4">C4 · Collective</option></select></label>
     </div>
-    <div class="panel">
-      <div class="head"><h2 style="margin:0">Phases involved</h2></div>
-      <div id="species" class="species"><span>—</span></div>
-    </div>
-    <div class="panel">
-      <div class="head"><h2 style="margin:0">Reaction energy by compute tier</h2><span class="pill info">RECORDED VALUES</span></div>
-      <div id="chart"><div class="empty">The energy at each tier appears as the run unfolds.</div></div>
-      <p class="note">Points are the reaction energies each tier returned (MLIP: MACE-MPA-0; MP: Materials Project). The shaded band is the borderline window the escalation rule uses (0 to −50 meV/atom). Per-step forces are not recorded, so none are shown.</p>
-    </div>
+    <div id="ranked-table" class="table-wrap"></div>
   </section>
-
-  <section class="col" aria-labelledby="t3">
-    <div id="t3" class="col-title">03 // Results</div>
-    <div class="panel plain" id="results"><div class="empty">Results appear when the triage finishes.</div></div>
+  <section id="view-trail" role="tabpanel" aria-labelledby="tab-trail">
+    <div class="trail-layout"><aside class="box record-sidebar" aria-label="Recorded assessments"><div class="sidebar-title"><h2>Recorded pairs</h2><span id="queue-count" class="counter">0</span></div><label class="sr-only" for="trail-search">Search recorded pairs</label><input id="trail-search" type="search" placeholder="Find a pair or item"><label class="sr-only" for="condition-filter">Filter condition</label><select id="condition-filter"><option value="all">All conditions</option><option value="C1">C1</option><option value="C2">C2</option><option value="C3">C3</option><option value="C4">C4</option></select><div id="record-list" class="record-list"></div></aside><div id="trail-content" aria-live="polite" class="trail-content"></div></div>
   </section>
+  <section id="view-quality" role="tabpanel" aria-labelledby="tab-quality" hidden>
+    <div class="section-heading"><div><h2>How good is it?</h2><p>Retrospective evaluation on public data. Conditions and seeds remain separate; missing results stay pending.</p></div></div>
+    <article class="box call-box"><div class="box-header"><div><span class="strip-eyebrow"><i class="furnace-dot" aria-hidden="true"></i>Interactive pair checker</span><h3>Make your call</h3></div><span class="label" id="call-scope">Awaiting released pairs</span></div><div id="call-content" class="box-body"></div></article>
+    <article class="box"><div class="box-header"><h3>Condition comparison</h3><span class="label">H100 run</span></div><div id="comparison-table" class="table-wrap"></div><p class="box-note">Coverage is the share without a review flag. It is not accuracy. Accuracy, AUROC and Brier scores are shown only from matching evaluator outputs.</p></article>
+    <article class="box"><div class="box-header"><h3>Compute allocation</h3><span class="label">Recorded requests</span></div><div id="allocation-table" class="table-wrap"></div></article>
+    <article class="box"><div class="box-header"><h3>Protocol and provenance</h3><span class="label">Audit digests</span></div><div id="provenance-content" class="box-body"></div><div class="box-footer"><a href="/amendments" target="_blank" rel="noopener">GB10 invalidation and H100 adoption amendment ↗</a></div></article>
+  </section>
+  <footer class="page-footer"><span><strong>Kiln Triage</strong> · Auditable solid-state reaction triage</span><span>No live compute · No inferred lab outcomes</span></footer>
 </main>
+
 <script type="application/json" id="kiln-data">__KILN_DATA__</script>
-<script>
-const $ = id => document.getElementById(id);
-const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const pretty = v => String(v ?? '').replace(/_/g, ' ');
-const meV = v => (typeof v === 'number' ? (v * 1000).toFixed(1) : '—');
-const num = (v, d) => (typeof v === 'number' ? v.toFixed(d) : '—');
-const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-let PAIRS = [], LIVE = false, timer = null, poll = null;
-
-function key(a, b) { return [a, b].map(s => String(s ?? '').trim().toLowerCase()).sort().join('|'); }
-function findPair(a, b) { const k = key(a, b); return PAIRS.find(p => key(p.precursor_a, p.precursor_b) === k); }
-function updateHint() {
-  const a = $('pa').value, b = $('pb').value, p = (a && b) ? findPair(a, b) : null, h = $('pair-hint');
-  if (!a || !b) { h.className = 'hint'; h.textContent = PAIRS.length ? `${PAIRS.length} recorded pairs available.` : 'Loading recorded pairs…'; return; }
-  if (p) {
-    const conds = [...new Set(p.runs.map(r => r.condition))].sort().join(', ');
-    h.className = 'hint';
-    h.textContent = `Recorded${p.temperature_c != null ? ` at ${p.temperature_c} °C` : ''}${p.dwell_h != null ? `, ${p.dwell_h} h` : ''} · runs: ${conds}`;
-    if (p.temperature_c != null) $('temp').value = p.temperature_c;
-    if (p.dwell_h != null) $('dwell').value = p.dwell_h;
-  } else { h.className = 'hint warn'; h.textContent = LIVE ? 'Not recorded: Run triage will run it live.' : 'Not in the recorded runs, and live mode is off here.'; }
-}
-async function boot() {
-  try {
-    const [pairs, status] = await Promise.all([fetch('/api/pairs').then(r => r.json()), fetch('/api/status').then(r => r.json())]);
-    PAIRS = pairs; LIVE = !!status.live;
-  } catch (e) { $('msg').className = 'hint warn'; $('msg').textContent = 'Could not load the recorded pairs.'; }
-  $('live-badge').textContent = LIVE ? 'LIVE MODE ON' : 'LIVE MODE OFF'; $('live-badge').classList.toggle('on', LIVE);
-  $('live-note').textContent = LIVE ? 'Live mode is on: new pairs run through the real agents and compute.' : "Live mode is off on this server, so new pairs can't be run here.";
-  const formulas = [...new Set(PAIRS.flatMap(p => [p.precursor_a, p.precursor_b]))].sort();
-  $('formulas').innerHTML = formulas.map(f => `<option value="${esc(f)}">`).join('');
-  if (PAIRS.length && !$('pa').value) { $('pa').value = PAIRS[0].precursor_a; $('pb').value = PAIRS[0].precursor_b; }
-  updateHint();
-}
-['pa', 'pb'].forEach(id => $(id).addEventListener('input', updateHint));
-
-function statusOf(reqs, done) {
-  const relax = reqs.filter(r => r.tier === 'bounded_relaxation'), sp = reqs.filter(r => r.tier === 'single_point');
-  const last = (relax.length ? relax : sp).slice(-1)[0];
-  if (!last) return done ? ['ok', 'LOOKUP ONLY'] : ['', 'RUNNING'];
-  if (last.status === 'failed') return ['bad', 'FAILED'];
-  if (last.status === 'not_converged') return ['bad', 'NOT_CONVERGED'];
-  return ['ok', relax.length ? 'CONVERGED' : 'SINGLE POINT'];
-}
-function events(data) {
-  const ev = [...(data.artifacts || []).map(a => ({kind: 'agent', t: a.created_at, a})), ...(data.requests || []).map(r => ({kind: 'compute', t: r.created_at, r}))];
-  return ev.sort((x, y) => String(x.t || '').localeCompare(String(y.t || '')));
-}
-function evHTML(e) {
-  if (e.kind === 'agent') {
-    const a = e.a;
-    return `<div class="ev"><span class="who">${esc(a.agent)}</span><span class="what">${esc(a.rationale || pretty(a.type))}</span><span class="end">${esc(a.verifier || '')}</span></div>`;
-  }
-  const r = e.r, res = r.result || {}, gpu = r.gpu_seconds ? `${Number(r.gpu_seconds).toFixed(1)} GPU-s` : '';
-  const src = res.model ? ' · ' + res.model + (res.backend ? ' (' + res.backend + ')' : '') : (res.source ? ' · ' + pretty(res.source) : '');
-  const detail = res.error ? res.error : (res.dE_ev_per_atom != null ? `ΔE ${meV(res.dE_ev_per_atom)} meV/atom${src}` : (r.reason || ''));
-  return `<div class="ev compute"><span class="who">${esc(pretty(r.tier))}</span><span class="what">${esc(detail)}</span><span class="end">${esc(pretty(r.status))}<br>${esc(r.compute_units ?? '—')} u ${esc(gpu)}</span></div>`;
-}
-function speciesOf(data, reqs) {
-  const s = new Set([data.item?.precursor_a, data.item?.precursor_b].filter(Boolean));
-  for (const r of reqs) {
-    const res = r.result || {};
-    for (const k of ['products', 'mp_products', 'reactants']) String(res[k] || '').split('+').map(x => x.trim()).filter(Boolean).forEach(x => s.add(x));
-    if (res.competitor_formula) s.add(res.competitor_formula);
-  }
-  return [...s];
-}
-function chart(reqs) {
-  const tiers = ['cached_lookup', 'decomposition_reeval', 'single_point', 'bounded_relaxation'], pts = [], seen = new Set();
-  for (const r of reqs) {
-    const res = r.result || {};
-    if (res.dE_ev_per_atom == null || !tiers.includes(r.tier)) continue;
-    const mlipTier = r.tier === 'single_point' || r.tier === 'bounded_relaxation';
-    const p = {label: pretty(r.tier), mlip: mlipTier ? res.dE_ev_per_atom * 1000 : null,
-               mp: mlipTier ? (res.dE_mp_ev_per_atom != null ? res.dE_mp_ev_per_atom * 1000 : null) : res.dE_ev_per_atom * 1000};
-    const k = p.label + p.mlip + p.mp; if (!seen.has(k)) { seen.add(k); pts.push(p); }
-  }
-  if (!pts.length) return '<div class="empty">No energies recorded yet.</div>';
-  const vals = pts.flatMap(p => [p.mlip, p.mp]).filter(v => v != null).concat([0, -50]);
-  let lo = Math.min(...vals), hi = Math.max(...vals); const pad = Math.max(8, (hi - lo) * .15); lo -= pad; hi += pad;
-  const W = 520, H = 220, L = 46, R = 12, T = 14, B = 40;
-  const y = v => T + (hi - v) / (hi - lo) * (H - T - B), x = i => L + (pts.length === 1 ? (W - L - R) / 2 : 30 + i * (W - L - R - 60) / (pts.length - 1));
-  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Reaction energy at each compute tier" style="width:100%;height:auto;display:block">`;
-  s += `<rect x="${L}" y="${y(0)}" width="${W - L - R}" height="${Math.max(0, y(-50) - y(0))}" fill="#ff7a1a" fill-opacity=".10"/>`;
-  [0, 1, 2, 3, 4].map(i => lo + (hi - lo) * i / 4).forEach(v => { s += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="#252a32"/><text x="${L - 6}" y="${y(v) + 3}" text-anchor="end">${v.toFixed(0)}</text>`; });
-  s += `<line x1="${L}" x2="${W - R}" y1="${y(-50)}" y2="${y(-50)}" stroke="#ff7a1a" stroke-opacity=".6" stroke-dasharray="4 4"/><text x="${W - R}" y="${y(-50) - 4}" text-anchor="end">−50 meV/atom</text>`;
-  const path = k => { let d = '', m = true; pts.forEach((p, i) => { if (p[k] == null) return; d += `${m ? 'M' : 'L'}${x(i)},${y(p[k])} `; m = false; }); return d; };
-  s += `<path d="${path('mp')}" fill="none" stroke="#8b94a1" stroke-width="1.5"/><path d="${path('mlip')}" fill="none" stroke="#ff7a1a" stroke-width="2"/>`;
-  pts.forEach((p, i) => {
-    if (p.mp != null) s += `<circle cx="${x(i)}" cy="${y(p.mp)}" r="4" fill="#8b94a1"/>`;
-    if (p.mlip != null) s += `<circle cx="${x(i)}" cy="${y(p.mlip)}" r="5" fill="#ff7a1a"/>`;
-    s += `<text x="${x(i)}" y="${H - 22}" text-anchor="middle">${esc(p.label)}</text>`;
-  });
-  s += `<text x="${L}" y="${H - 4}">orange: MLIP · grey: Materials Project · meV/atom</text></svg>`;
-  return s;
-}
-function results(data) {
-  const p = data.prediction, it = data.item || {}, reqs = data.requests || [];
-  if (!p) return '<div class="empty">Waiting for the prediction…</div>';
-  const mlip = [...reqs].reverse().find(r => (r.tier === 'bounded_relaxation' || r.tier === 'single_point') && r.result && r.result.dE_ev_per_atom != null);
-  const lookup = reqs.find(r => r.tier === 'cached_lookup' && r.result && r.result.dE_ev_per_atom != null);
-  const dE = mlip ? `${meV(mlip.result.dE_ev_per_atom)} meV/atom (MLIP) vs ${meV(mlip.result.dE_mp_ev_per_atom)} (MP)`
-                  : (lookup ? `${meV(lookup.result.dE_ev_per_atom)} meV/atom (MP; no GPU tier bought)` : '—');
-  const flags = (p.review_flags || []).map(f => `<li><strong>${esc(pretty(f.reason))}</strong>: ${esc(f.detail || '')}</li>`).join('');
-  const c = p.cost || {};
-  return `<div class="head"><span class="sub" style="margin:0">Summary</span>${p.needs_review ? '<span class="pill warn">NEEDS REVIEW</span>' : '<span class="pill ok">NO REVIEW FLAG</span>'}</div>
-    <div class="big">${esc(it.precursor_a)} + ${esc(it.precursor_b)}</div>
-    <div class="hint">${it.temperature_c != null ? esc(it.temperature_c) + ' °C' : 'temperature not recorded on this server'}${it.dwell_h != null ? ' · ' + esc(it.dwell_h) + ' h' : ''} · ${esc(p.condition || '')} seed ${esc(p.seed ?? '')} · ${esc(data.source_label || '')}</div>
-    <div class="sub">Prediction</div><div class="cat">${esc(pretty(p.category))}</div>
-    <dl class="kv" style="margin-top:8px"><dt>p_react</dt><dd>${num(p.p_react, 3)}</dd><dt>ΔE</dt><dd>${esc(dE)}</dd>
-      <dt>Cause</dt><dd>${esc(pretty(p.cause))}</dd><dt>Fix</dt><dd>${esc(p.fix || '—')}</dd>
-      <dt>Compute</dt><dd>${esc(c.compute_units ?? '—')} units · ${num(c.gpu_seconds, 1)} GPU-s · ${esc((c.tokens_in ?? 0) + (c.tokens_out ?? 0))} tokens</dd></dl>
-    <div class="sub">Review flags (${(p.review_flags || []).length})</div>${flags ? `<ul class="flags">${flags}</ul>` : '<div class="hint">None.</div>'}
-    <p class="note">Model assessment, not a laboratory outcome.</p>`;
-}
-function paint(data, shown, done) {
-  const ev = events(data).slice(0, shown), reqs = ev.filter(e => e.kind === 'compute').map(e => e.r);
-  $('feed').innerHTML = ev.map(evHTML).join('') || '<div class="empty">Starting…</div>';
-  $('feed').scrollTop = $('feed').scrollHeight;
-  const [cls, label] = statusOf(reqs, done), st = $('status'); st.className = 'pill ' + cls; st.textContent = label;
-  $('species').innerHTML = speciesOf(data, reqs).map(s => `<span>${esc(s)}</span>`).join('') || '<span>—</span>';
-  $('chart').innerHTML = chart(reqs);
-  $('results').innerHTML = done ? results(data) : '<div class="empty">Results appear when the triage finishes.</div>';
-}
-function finish() { $('run').disabled = false; if (!$('msg').classList.contains('warn')) $('msg').textContent = ''; }
-function animate(data) {
-  clearInterval(timer); const n = events(data).length;
-  if (reduced || n === 0) { paint(data, n, true); return finish(); }
-  const step = Math.max(350, Math.min(1500, 15000 / n)); let i = 0;
-  timer = setInterval(() => { i++; paint(data, i, i >= n); if (i >= n) { clearInterval(timer); finish(); } }, step);
-}
-async function run() {
-  clearInterval(timer); clearInterval(poll);
-  const body = {precursor_a: $('pa').value, precursor_b: $('pb').value, temperature_c: $('temp').value, dwell_h: $('dwell').value, condition: $('cond').value, seed: $('seed').value};
-  if (!findPair(body.precursor_a, body.precursor_b) && LIVE) body.live = true;
-  $('run').disabled = true; $('msg').className = 'hint'; $('msg').textContent = body.live ? 'Running live through the agents…' : 'Replaying the recorded run…';
-  try {
-    const res = await fetch('/api/triage', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
-    const data = await res.json();
-    if (!res.ok) throw new Error((data.error || 'Request failed.') + (data.available ? ' Recorded: ' + data.available.map(r => `${r.condition} seed ${r.seed}`).join(', ') + '.' : ''));
-    if (data.mode === 'live') {
-      poll = setInterval(async () => {
-        const s = await fetch('/api/triage/' + data.job).then(r => r.json()), done = s.status !== 'running';
-        paint(s, events(s).length, done && !!s.prediction);
-        if (done) { clearInterval(poll); if (s.error) { $('msg').className = 'hint warn'; $('msg').textContent = s.error; } finish(); }
-      }, 2000);
-    } else animate(data);
-  } catch (e) { $('msg').className = 'hint warn'; $('msg').textContent = e.message; $('run').disabled = false; }
-}
-$('run').addEventListener('click', run);
-boot();
-</script>
+<script type="application/json" id="kiln-state">__KILN_STATE__</script>
 </body>
 </html>
