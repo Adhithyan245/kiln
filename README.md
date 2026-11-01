@@ -4,7 +4,7 @@ Kiln is a system that predicts whether two precursor chemicals will react in a f
 
 **The problem.** Labs waste days trying precursor pairs that never react. Running heavy simulations on every pair is too costly, so the real question is where extra computation actually pays off.
 
-**What we're building**
+**How it works**
 
 - **Three specialist agents.** Thermo checks the energies, Kinetics checks whether the temperature is high enough, and Precursor checks whether an ingredient breaks down or evaporates first.
 - **A shared need board with no central planner.** A specialist posts what it needs, such as a better energy for a pair, and another picks it up.
@@ -20,14 +20,13 @@ Kiln is a system that predicts whether two precursor chemicals will react in a f
 - specialists that coordinate through the board (the collective),
 - a central planner.
 
-The question is whether coordination adds measurable accuracy for the same spend. The protocol (`protocol/protocol.md`) must be frozen and its hash posted before any held-out run, and the scoring code refuses to read labels until the prediction file's hash has been posted.
+The question is whether coordination adds measurable accuracy for the same spend. The protocol (`protocol/protocol.md`) was frozen and its hash posted (Gate P) before any held-out run, and the scoring code refuses to read labels until the prediction file's hash has been posted.
+
+**Related work.** Kiln does not claim its coordination method is new: it builds on multi-agent science systems such as AutoScientists and the ScienceClaw + Infinite framework this hackathon is built around. Prior work on solid-state synthesis prediction (ARROWS3, reaction networks, LLM and ML synthesis predictors) is summarised with sources in `docs/related-work.md`.
 
 Built at the ScienceClaw hackathon (MIT Media Lab, Oct 30–Nov 1, 2026) by Adhi, Hemanath, CJ and Annamayya.
 
-- Project rules for every coding assistant (Claude Code, Codex, Gemini CLI): `AGENTS.md`
-- Each person's first tasks: `prompts/`
-- Shared formats every module must follow: `docs/interfaces.md`
-- Branching and protection: `docs/github-setup.md`
+For contributors: project rules for every coding assistant in `AGENTS.md`, shared formats in `docs/interfaces.md`, branching in `docs/github-setup.md`, first tasks in `prompts/`.
 
 ## Results (Night 2, real compute)
 
@@ -64,9 +63,24 @@ H100 run with the NVIDIA ALCHEMI Toolkit, on the **301 held-out pairs that every
 - Every prediction set was hashed and posted before grading.
 - The evaluator refuses to read labels until it verifies the posted hash.
 - **The first GB10 run silently used the stub compute backend** (`KILN_COMPUTE_BACKEND` defaulted to `stub`). We found it from the compute logs (`"model": "stub"`), not from the scores, and declared it invalid in `protocol/amendments.md` before scoring the H100 run. The runners now fail closed on a stub or unset backend, and the app refuses to show stub runs. The invalid run is kept, byte-exact, in `stub-invalid-20261101/`.
-- A GB10 (DGX Spark) rerun with real compute has all three C1 seeds complete; C2–C4 are still running (`runs/`).
+- A GB10 (DGX Spark) rerun with real compute is a **partial replication only** (all three C1 seeds complete, C2–C4 partial, `runs/`); it is never used to choose or replace the results above.
 
-**App (live): https://port8080-y5rt4kh4nk91y1g.tunnel.applications.uk-south2.nebius.cloud/** (Nebius; backup: http://81.85.1.97/) — `app/` is an interactive triage app that replays any recorded held-out pair step by step: agent decisions, GPU calculations, convergence, and the result with review flags. Deployment: `docs/deploy.md`.
+## Try it
+
+- **App: https://port8080-y5rt4kh4nk91y1g.tunnel.applications.uk-south2.nebius.cloud/** (a Nebius Serverless AI endpoint). It replays any recorded held-out pair step by step from the real H100 run: agent decisions, GPU calculations, convergence, and the result with review flags.
+- **Live demo: http://81.85.1.97/** (a Nebius CPU VM). A pair that isn't recorded runs live through the real agents (Gemini) and MACE on CPU; a lookup-only pair takes under a minute, a relaxation several minutes. Live runs are demonstrations, not part of the evaluated results.
+
+Run it yourself (Python 3.12, [uv](https://docs.astral.sh/uv/)):
+
+```bash
+uv sync && uv run pytest                                      # install and run the tests
+python3 app/server.py                                         # the app (replay), http://127.0.0.1:8080
+python -m kiln.night run src/kiln/night/plans/night2.toml     # a night run; see docs/night-runner-walkthrough.md
+```
+
+Deployment (Nebius serverless endpoint, VM, Docker): `docs/deploy.md`. GPU host readiness check (setup, known-answer test, canary that refuses stub compute): `env/gb10/ready.sh`.
+
+**Built with:** NVIDIA ALCHEMI Toolkit (every GPU calculation in the H100 result, inside the agent loop), NVIDIA DGX Spark (GB10: profiling, dry runs, replication), MACE-MPA-0, Gemini 3.8 Flash (agent decisions), Nebius (serverless endpoint, VM, container registry), the Materials Project, pymatgen and ASE.
 
 ## Data and license
 
