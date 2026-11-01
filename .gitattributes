@@ -1,0 +1,7 @@
+# Hashed outputs are byte-exact: never convert line endings on any machine.
+# The posted prediction-manifest hash (protocol §10, Gate H) covers these exact bytes, so a
+# Windows checkout with core.autocrlf=true must not rewrite them.
+runs/** -text
+protocol/*.manifest.json -text
+protocol/posts*.jsonl -text
+protocol/frozen_settings.json -text

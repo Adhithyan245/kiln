@@ -1,0 +1,15 @@
+2026-11-01T05:50:55+00:00 [night2] night 'night2' starting
+2026-11-01T06:20:55+00:00 [night2] heartbeat: {'done': 1} pending=9; tokens 1989644/12000000, usd 5.14/30.0, gpu_h 0.29/8.0
+2026-11-01T06:50:55+00:00 [night2] heartbeat: {'done': 1} pending=9; tokens 3950878/12000000, usd 10.23/30.0, gpu_h 0.29/8.0
+2026-11-01T07:20:56+00:00 [night2] heartbeat: {'done': 1} pending=9; tokens 5750552/12000000, usd 14.99/30.0, gpu_h 0.29/8.0
+2026-11-01T07:50:56+00:00 [night2] heartbeat: {'done': 1} pending=9; tokens 6799635/12000000, usd 17.94/30.0, gpu_h 0.29/8.0
+2026-11-01T08:20:56+00:00 [night2] heartbeat: {'done': 1} pending=9; tokens 7691723/12000000, usd 20.44/30.0, gpu_h 0.29/8.0
+2026-11-01T08:29:26+00:00 [night2] push: attempt 1/4 failed (exit code 1); retrying in 37s
+2026-11-01T08:30:03+00:00 [night2] push: attempt 2/4 failed (exit code 1); retrying in 72s
+2026-11-01T08:31:15+00:00 [night2] push: attempt 3/4 failed (exit code 1); retrying in 125s
+2026-11-01T08:33:21+00:00 [night2] push: FAILED after 4 attempts (exit code 1)
+2026-11-01T08:33:22+00:00 [night2] fetch_labels: skipped, dependencies not done: ['push']
+2026-11-01T08:33:22+00:00 [night2] score: skipped, dependencies not done: ['fetch_labels']
+2026-11-01T08:33:22+00:00 [night2] figures: skipped, dependencies not done: ['score']
+2026-11-01T08:33:23+00:00 [night2] stop_brev: skipped, env not set: ['BREV_INSTANCE']
+2026-11-01T08:33:23+00:00 [night2] night 'night2' finished: NOT OK; failed=['push'] stopped=None

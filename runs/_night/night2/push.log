@@ -1,0 +1,68 @@
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/dell/kiln/src/kiln/night/gitpush.py", line 55, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/dell/kiln/src/kiln/night/gitpush.py", line 50, in main
+    print(push(args.paths, args.message, allow_no_remote=args.allow_no_remote))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/dell/kiln/src/kiln/night/gitpush.py", line 30, in push
+    _git("commit", "-m", message)
+  File "/home/dell/kiln/src/kiln/night/gitpush.py", line 18, in _git
+    return subprocess.run(["git", *args], capture_output=True, text=True, check=True).stdout.strip()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/dell/alchemi/python/cpython-3.12.16-linux-aarch64-gnu/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['git', 'commit', '-m', 'night2: predictions, receipt and results']' returned non-zero exit status 128.
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/dell/kiln/src/kiln/night/gitpush.py", line 55, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/dell/kiln/src/kiln/night/gitpush.py", line 50, in main
+    print(push(args.paths, args.message, allow_no_remote=args.allow_no_remote))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/dell/kiln/src/kiln/night/gitpush.py", line 30, in push
+    _git("commit", "-m", message)
+  File "/home/dell/kiln/src/kiln/night/gitpush.py", line 18, in _git
+    return subprocess.run(["git", *args], capture_output=True, text=True, check=True).stdout.strip()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/dell/alchemi/python/cpython-3.12.16-linux-aarch64-gnu/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['git', 'commit', '-m', 'night2: predictions, receipt and results']' returned non-zero exit status 128.
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/dell/kiln/src/kiln/night/gitpush.py", line 55, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/dell/kiln/src/kiln/night/gitpush.py", line 50, in main
+    print(push(args.paths, args.message, allow_no_remote=args.allow_no_remote))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/dell/kiln/src/kiln/night/gitpush.py", line 30, in push
+    _git("commit", "-m", message)
+  File "/home/dell/kiln/src/kiln/night/gitpush.py", line 18, in _git
+    return subprocess.run(["git", *args], capture_output=True, text=True, check=True).stdout.strip()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/dell/alchemi/python/cpython-3.12.16-linux-aarch64-gnu/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['git', 'commit', '-m', 'night2: predictions, receipt and results']' returned non-zero exit status 128.
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/dell/kiln/src/kiln/night/gitpush.py", line 55, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/dell/kiln/src/kiln/night/gitpush.py", line 50, in main
+    print(push(args.paths, args.message, allow_no_remote=args.allow_no_remote))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/dell/kiln/src/kiln/night/gitpush.py", line 30, in push
+    _git("commit", "-m", message)
+  File "/home/dell/kiln/src/kiln/night/gitpush.py", line 18, in _git
+    return subprocess.run(["git", *args], capture_output=True, text=True, check=True).stdout.strip()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/dell/alchemi/python/cpython-3.12.16-linux-aarch64-gnu/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['git', 'commit', '-m', 'night2: predictions, receipt and results']' returned non-zero exit status 128.
