@@ -102,11 +102,21 @@ def test_h100_replication_never_writes_where_the_gb10_run_does() -> None:
 def test_h100_preflight_requires_the_second_gemini_account(tmp_path: Path, monkeypatch) -> None:
     import subprocess
 
+    import importlib.util
+
     code = load_plan(PLANS / "night2-h100.toml").step("preflight").cmd[2]
-    env = {k: v for k, v in __import__("os").environ.items() if not k.startswith("GEMINI_API_KEY")}
-    run = lambda extra: subprocess.run([sys.executable, "-c", code], env={**env, **extra}, capture_output=True)  # noqa: E731
-    assert run({"GEMINI_API_KEY_2": "x"}).returncode == 0
-    assert run({"GEMINI_API_KEY_2": "x", "GEMINI_API_KEY": "y"}).returncode != 0
+    env = {k: v for k, v in __import__("os").environ.items()
+           if not k.startswith("GEMINI_API_KEY") and k != "KILN_TIER_SETTINGS"}
+    root = PLANS.parents[3]
+    run = lambda extra: subprocess.run([sys.executable, "-c", code], env={**env, **extra}, capture_output=True, cwd=root)  # noqa: E731
+    ready = {"GEMINI_API_KEY_2": "x", "KILN_TIER_SETTINGS": "env/h100/tier_settings.json"}
+    ok = run(ready)
+    if importlib.util.find_spec("nvalchemi"):
+        assert ok.returncode == 0
+    else:   # everything else passed; only the ALCHEMI Toolkit import is missing on this machine
+        assert ok.returncode != 0 and b"nvalchemi" in ok.stderr
+    assert b"KILN_TIER_SETTINGS" in run({"GEMINI_API_KEY_2": "x"}).stderr   # Toolkit settings are required
+    assert run({**ready, "GEMINI_API_KEY": "y"}).returncode != 0
     assert run({}).returncode != 0
 
 

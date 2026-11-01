@@ -113,3 +113,17 @@ def test_bundled_settings_load_and_satisfy_the_client(tmp_path: Path) -> None:
     # float32 decided in docs/compute-decisions.md; part of the cache key, so profile and fill with it
     assert settings[ComputeTier.single_point]["dtype"] == settings[ComputeTier.bounded_relaxation]["dtype"] == "float32"
     ComputeClient(tmp_path / "x", profile_config("x"), TimedBackend(), ResultCache(tmp_path / "c"), settings)
+
+
+def test_h100_settings_are_the_gb10_settings_on_the_toolkit_backend(monkeypatch) -> None:
+    root = Path(__file__).parents[2]
+    gb10 = load_tier_settings(root / "env" / "gb10" / "tier_settings.json")
+    monkeypatch.setenv("KILN_TIER_SETTINGS", str(root / "env" / "h100" / "tier_settings.json"))
+    h100 = load_tier_settings()
+    toolkit = {"backend", "fire_tmax", "fire_maxstep", "dt"}
+    for tier in ComputeTier:
+        assert {k: v for k, v in h100[tier].items() if k not in toolkit} == gb10[tier]   # same physics otherwise
+    assert h100[ComputeTier.bounded_relaxation]["backend"] == h100[ComputeTier.single_point]["backend"] == "nvalchemi+ase"
+    monkeypatch.delenv("KILN_TIER_SETTINGS")
+    monkeypatch.chdir(root)
+    assert load_tier_settings() == gb10                                                     # default unchanged

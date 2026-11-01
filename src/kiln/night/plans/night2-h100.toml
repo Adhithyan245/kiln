@@ -5,6 +5,8 @@
 #   protocol/predictions-h100.manifest.json  manifest
 #   protocol/posts-h100.jsonl                hash-post receipt
 # It uses the second Gemini account: set GEMINI_API_KEY_2 and leave GEMINI_API_KEY unset (preflight checks).
+# Its GPU tiers run on the NVIDIA ALCHEMI Toolkit (row 28): set KILN_TIER_SETTINGS=env/h100/tier_settings.json
+# (backend "nvalchemi+ase": Toolkit batches, ASE finishes what they leave). Preflight refuses to start without it.
 # The GB10 run is primary and is named before anything is graded; this one is reported in its own table.
 #
 #   python -m kiln.night run src/kiln/night/plans/night2-h100.toml --runs-dir runs-h100
@@ -34,8 +36,9 @@ manifest = "protocol/predictions-h100.manifest.json"
 [[steps]]
 name = "preflight"
 # Imports, and the key split: llm_call tries GEMINI_API_KEY first, so it must be unset here for the
-# replication to run on the second account.
-cmd = ["python", "-c", "import os, kiln.compute.client, kiln.scoring.score; assert not os.environ.get('GEMINI_API_KEY'), 'unset GEMINI_API_KEY: the H100 run uses the second account'; assert os.environ.get('GEMINI_API_KEY_2'), 'set GEMINI_API_KEY_2'; print('imports ok; second Gemini account')"]
+# replication to run on the second account. Then the Toolkit: the H100 tier settings must be selected and
+# the ALCHEMI Toolkit must import, so a forgotten variable can't silently run plain ASE.
+cmd = ["python", "-c", "import os, kiln.compute.client, kiln.scoring.score; assert not os.environ.get('GEMINI_API_KEY'), 'unset GEMINI_API_KEY: the H100 run uses the second account'; assert os.environ.get('GEMINI_API_KEY_2'), 'set GEMINI_API_KEY_2'; assert os.environ.get('KILN_TIER_SETTINGS') == 'env/h100/tier_settings.json', 'set KILN_TIER_SETTINGS=env/h100/tier_settings.json'; from kiln.compute.profile import load_tier_settings; from kiln.schemas import ComputeTier; assert load_tier_settings()[ComputeTier.bounded_relaxation]['backend'] == 'nvalchemi+ase'; import nvalchemi; print('imports ok; second Gemini account; ALCHEMI Toolkit backend')"]
 timeout_s = 300
 retries = 0
 

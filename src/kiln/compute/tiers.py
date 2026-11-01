@@ -238,10 +238,12 @@ def _mlip(tier: ComputeTier, inputs: dict[str, Any], settings: dict[str, Any], c
     # as O2 with a variable cell does not converge and means nothing here, so they get a single point.
     is_element = [str(e.entry_id) in elements for e in phases]
     results: list[StructureResult | None] = [None] * len(phases)
+    finished_by_ase = 0
     for flag, fn in ((True, single_point), (False, bounded_relaxation if relax else single_point)):
         idx = [i for i, el in enumerate(is_element) if el == flag]
         if idx:
             run = fn([phases[i].structure for i in idx], settings, calculator_factory=calculator_factory)
+            finished_by_ase += run.n_finished_by_ase
             for i, r in zip(idx, run.results):
                 results[i] = r
     failed = [f"{e.entry_id}: {r.error}" for e, r in zip(phases, results) if r.status == ComputeStatus.failed]
@@ -272,6 +274,9 @@ def _mlip(tier: ComputeTier, inputs: dict[str, Any], settings: dict[str, Any], c
         "n_structures": len(phases),
         "n_elements_single_point": sum(is_element),
     }
+    if settings.get("backend", "ase") != "ase":   # the ASE default keeps its results exactly as before
+        result["backend"] = str(settings["backend"])
+        result["n_finished_by_ase"] = finished_by_ase
     if relax:
         result["max_steps_used"] = steps_used
         result["n_not_converged"] = len(not_converged)
@@ -322,6 +327,7 @@ class TierRun:
     results: list[StructureResult] = field(default_factory=list)
     wall_s: float = 0.0
     gpu_seconds: float = 0.0            # wall time on a CUDA device; 0 on CPU
+    n_finished_by_ase: int = 0          # "nvalchemi+ase": structures the Toolkit left unfinished
 
     @property
     def status(self) -> ComputeStatus:
@@ -353,8 +359,26 @@ def _run_structures(tier: ComputeTier, structures: Structure | Sequence[Structur
     device = str(settings.get("device", "cuda"))
     if backend == "nvalchemi":
         return _run_nvalchemi(tier, items, settings, device)
+    if backend == "nvalchemi+ase":
+        # The Toolkit runs the whole batch on the GPU; ASE re-runs, from the original structure, only
+        # what it left unconverged or failed, so a batch is never worse off than ASE alone.
+        first = _run_nvalchemi(tier, items, settings, device)
+        redo = [i for i, r in enumerate(first.results) if r.status != ComputeStatus.ok]
+        results = list(first.results)
+        wall, gpu = first.wall_s, first.gpu_seconds
+        if redo:
+            second = _run_ase(tier, [items[i] for i in redo], settings, calculator_factory, device)
+            for i, r in zip(redo, second.results):
+                results[i] = r
+            wall, gpu = wall + second.wall_s, gpu + second.gpu_seconds
+        return TierRun(tier, backend, dict(settings), results, round(wall, 3), round(gpu, 3), len(redo))
     if backend != "ase":
-        raise NotImplementedError(f"unknown backend {backend!r}; use 'ase' or 'nvalchemi'")
+        raise NotImplementedError(f"unknown backend {backend!r}; use 'ase', 'nvalchemi' or 'nvalchemi+ase'")
+    return _run_ase(tier, items, settings, calculator_factory, device)
+
+
+def _run_ase(tier: ComputeTier, items: list[Structure], settings: dict[str, Any],
+             calculator_factory: CalculatorFactory | None, device: str) -> TierRun:
     calc = (calculator_factory or mace_calculator)(settings)
     relax = tier == ComputeTier.bounded_relaxation
     results: list[StructureResult] = []
@@ -378,7 +402,7 @@ def _run_structures(tier: ComputeTier, structures: Structure | Sequence[Structur
     _sync(device)
     wall = time.perf_counter() - start
     gpu = wall if device.startswith("cuda") else 0.0
-    return TierRun(tier, backend, dict(settings), results, round(wall, 3), round(gpu, 3))
+    return TierRun(tier, "ase", dict(settings), results, round(wall, 3), round(gpu, 3))
 
 
 # ---------- NVIDIA ALCHEMI Toolkit backend ----------

@@ -135,6 +135,48 @@ def test_relaxation_converges_when_forces_and_stress_are_small(cache_dir: Path) 
     assert out.result["n_not_converged"] == 0 and out.result["max_steps_used"] == 0
 
 
+def _toolkit_leaving(stuck: set[int]):
+    """A stand-in for the ALCHEMI Toolkit batch: real (fake-MLIP) energies, but the structures at
+    the given batch positions come back not_converged, as 3 of 40 did on the GB10."""
+    from dataclasses import replace
+
+    from kiln.compute import tiers
+
+    def run(tier, items, settings, device):
+        out = tiers._run_ase(tier, items, settings, factory(FakeMLIP()), device)
+        results = [replace(r, status=ComputeStatus.not_converged, steps=settings.get("max_steps")) if i in stuck else r
+                   for i, r in enumerate(out.results)]
+        return replace(out, backend="nvalchemi", results=results, gpu_seconds=1.0)
+    return run
+
+
+def test_nvalchemi_plus_ase_reruns_only_what_the_toolkit_left(cache_dir: Path, monkeypatch) -> None:
+    from kiln.compute import tiers
+
+    monkeypatch.setattr(tiers, "_run_nvalchemi", _toolkit_leaving({1}))
+    structures = [structure_from_cache(f, cache_dir).structure for f in ("CaO", "TiO2", "CaTiO3")]
+    run = tiers.bounded_relaxation(structures, {**RELAX, "device": "cpu", "backend": "nvalchemi+ase"},
+                                   calculator_factory=factory(FakeMLIP()))
+    assert run.backend == "nvalchemi+ase" and run.n_finished_by_ase == 1
+    assert [r.status for r in run.results] == [ComputeStatus.ok] * 3       # ASE finished the stuck one
+    assert run.results[1].steps == 0                                        # it came from ASE, not the toolkit
+    assert run.gpu_seconds == 1.0                                           # toolkit time plus ASE (0 on CPU)
+
+
+def test_mlip_result_names_the_backend_and_how_many_ase_finished(cache_dir: Path, monkeypatch) -> None:
+    from kiln.compute import tiers
+
+    monkeypatch.setattr(tiers, "_run_nvalchemi", _toolkit_leaving({0}))
+    out = run_tier(ComputeTier.bounded_relaxation, PAIR, {**RELAX, "backend": "nvalchemi+ase"}, cache_dir=cache_dir,
+                   calculator_factory=factory(FakeMLIP()))
+    assert out.status == ComputeStatus.ok and out.result["n_not_converged"] == 0
+    assert out.result["backend"] == "nvalchemi+ase"
+    assert out.result["n_finished_by_ase"] == 2          # first structure of each batch (single points, relaxations)
+    default = run_tier(ComputeTier.bounded_relaxation, PAIR, RELAX, cache_dir=cache_dir,
+                       calculator_factory=factory(FakeMLIP()))
+    assert "backend" not in default.result and "n_finished_by_ase" not in default.result
+
+
 def test_relaxation_with_converged_forces_but_high_stress_is_not_converged(cache_dir: Path) -> None:
     out = run_tier(ComputeTier.bounded_relaxation, PAIR, RELAX, cache_dir=cache_dir,
                    calculator_factory=factory(FakeMLIP(stress=0.01)))

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import platform
 import random
 import statistics
@@ -47,7 +48,10 @@ def profile_config(run_id: str) -> RunConfig:
     )
 
 
-def load_tier_settings(path: Path = SETTINGS_FILE) -> dict[ComputeTier, dict[str, Any]]:
+def load_tier_settings(path: Path | None = None) -> dict[ComputeTier, dict[str, Any]]:
+    """The tier settings file: `path`, else $KILN_TIER_SETTINGS (the H100 replication points it at
+    env/h100/tier_settings.json, plan-changes row 28), else the GB10 file."""
+    path = path or Path(os.environ.get("KILN_TIER_SETTINGS") or SETTINGS_FILE)
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
     return {ComputeTier(k): dict(v) for k, v in raw.items() if not k.startswith("_")}
 
