@@ -1,0 +1,14 @@
+{
+  "_status": "Frozen settings for Night 2 on both machines (GB10 primary, H100 replication). Written by Adhi (CJ's runner task); pushed with Hemanath's OK (Nov 1), protocol/ being his folder. Prices and caps verbatim from protocol.md section 5 (prices_proposal.json at 1e8549b). Thresholds: OPEN-07 (borderline 0 < |dE| <= 0.05 eV/atom, |dE| <= 1e-6 counts as zero) and T_disagree 0.05 eV/atom (OPEN-06); Thermo's 0.1 eV/atom near-hull window is a constant in agents/thermo.py.",
+  "tier_prices": {
+    "cached_lookup": 0.1,
+    "single_point": 1.0,
+    "bounded_relaxation": 30.0,
+    "decomposition_reeval": 0.2
+  },
+  "max_compute_units_per_item": 32.0,
+  "max_tool_calls_per_item": 12,
+  "max_tokens_per_item": 40000,
+  "energy_margin_ev_per_atom": 0.05,
+  "disagreement_threshold_ev_per_atom": 0.05
+}
