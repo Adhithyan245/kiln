@@ -8,9 +8,9 @@ Thermo always starts with the cheapest evidence, `cached_lookup` (Materials Proj
 
 | Escalate when | To |
 |---|---|
-| (a) the reaction driving force is borderline: \|ΔE_rxn\| ≤ **T_rxn** (*proposed* 0.05 eV/atom), or | `single_point` (MACE energy of every candidate phase) |
+| (a) the reaction driving force is borderline: \|ΔE_rxn\| ≤ **T_rxn** (*recommended* 0.02 eV/atom from development data, below; was 0.05), or | `single_point` (MACE energy of every candidate phase) |
 | (b) a candidate product lies within **0.1 eV/atom of the hull, including on it** (0 ≤ E_hull ≤ 0.1) | `single_point` |
-| the `single_point` result still leaves (a) or (b) true, **or** \|ΔE_mlip − ΔE_mp\| > **T_disagree** (*proposed* 0.05 eV/atom) | `bounded_relaxation` (force **and** stress criteria, step cap) |
+| the `single_point` result still leaves (a) or (b) true, **or** \|ΔE_mlip − ΔE_mp\| > **T_disagree** (*recommended* 0.05 eV/atom, checked below) | `bounded_relaxation` (force **and** stress criteria, step cap) |
 
 Otherwise Thermo stops: the cheap answer is not going to flip.
 
@@ -24,6 +24,23 @@ Otherwise Thermo stops: the cheap answer is not going to flip.
 - Within that window, energy differences are comparable to the errors of DFT (GGA/GGA+U) and of MLIPs, so an independent energy estimate can change which phase wins. Far outside it, a second estimate almost never changes the verdict.
 - Phases **on** the hull (E_hull = 0) are included: Materials Project energies can be wrong too, and "computed energies were wrong" is one of the failure causes in our pitch.
 - One window across the code (decided by Adhi, Sat Oct 31): **0.1 eV/atom**, the same value `env/gb10/tier_settings.json` uses (`ehull_max_ev_per_atom`) to pick the near-hull competitors an MLIP re-ranks. Hemanath's B60meV (60 meV/atom) is a different quantity, the margin between competing products, and stays separate.
+
+## T_rxn and T_disagree from development data (Adhi, Sat Oct 31, evening)
+
+Development pairs only: no labels, no held-out pair (protocol §11 rule 6). Materials Project reaction energies for all 635 development pairs from the GB10's MP cache; MLIP-minus-MP gaps from the 20 profiled development pairs (`runs/profile-promaxgb10-99ea-s0` on the GB10).
+
+| T_rxn | Development pairs with \|ΔE_rxn\| ≤ T_rxn | Excluding ΔE_rxn = 0 |
+|---|---|---|
+| 0.01 | 46% | 8% |
+| **0.02** | **58%** | **20%** |
+| 0.03 | 67% | 29% |
+| 0.05 | 78% | 40% |
+| 0.10 | 92% | 54% |
+
+- 38% of development pairs have ΔE_rxn = 0 exactly (no product below the join in Materials Project). Non-zero \|ΔE_rxn\|: p25 0.017, median 0.032, p75 0.064 eV/atom.
+- **T_rxn 0.02 recommended.** At 0.05, 78% of pairs count as borderline, and a single point rarely moves ΔE by more than 0.02, so most of them also go on to a relaxation: escalation becomes nearly automatic and the conditions stop differing in where they spend compute. 0.02 matches the measured MLIP-vs-MP gap, which is the size of change a second energy can make.
+- **T_disagree 0.05 recommended (kept).** \|ΔE_mlip − ΔE_mp\| on the 20 profiled pairs: at most 0.035 eV/atom for single points (0.038 relaxed); 18 of 20 at most 0.017. So 0.05 fires only on a clear disagreement and does not flood the `conflict` review flag. 20 pairs is too few to justify a finer value.
+- **Still Annamayya's call:** whether ΔE_rxn = 0 counts as borderline. Counting it is defensible (a near-hull competitor could become stable) but adds 38 percentage points of escalations.
 
 ## What not to claim
 

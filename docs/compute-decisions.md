@@ -27,6 +27,7 @@ Source: `results/gb10/first_calcs_float64.json`, `results/gb10/first_calcs_float
 ## 3. Open
 
 - None. The hull window is decided below.
+- Recommended for OPEN-06/07 (Annamayya decides, Hemanath freezes): **T_rxn 0.02** and **T_disagree 0.05** eV/atom, from development data only; evidence in `docs/escalation-rule.md`.
 
 ## 4. Hull window: 0.1 eV/atom, one value (decided Sat Oct 31)
 
