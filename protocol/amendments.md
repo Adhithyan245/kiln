@@ -96,3 +96,11 @@ A GB10 rerun with real compute started on 2026-11-01 at 12:57:47Z.
 - **Who made the change:** Adhi and Hemanath.
 - **Decision timing:** Decided and recorded on 2026-11-01 while the GB10 rerun and H100 run are both in progress, before either run's predictions are unblinded or scored.
 
+
+### 2026-11-01: H100 GPU-hour cap raised a second time, from 14.0 to 20.0
+
+- **What changed:** the H100 replication's GPU-hour safety cap, from 14.0 to 20.0 GPU-hours, in a new resume plan on the VM (`~/kiln-h100/night2-h100-resume20.toml`, SHA-256 `5a62257b34c999b2775a2e36a436948eaf285255c120d735b77e8f6316417bbe`). That is the only line that differs from `night2-h100-resume.toml`. Code, settings, items file, MP cache, model and key split are unchanged. The run resumed in the same shell, and the new process environment was checked: `KILN_COMPUTE_BACKEND=local`, `KILN_TIER_SETTINGS=env/h100/tier_settings.json`, `GEMINI_API_KEY_2` set and `GEMINI_API_KEY` unset.
+- **Why:** the 14.0 figure was set at 09:29 UTC from a rough estimate. Measured from the 11:54 UTC resume onward, the run spends about 0.0076 GPU-hours per prediction (738 predictions for 5.59 GPU-hours, 11:54 to 13:23 UTC). It stopped with 413 of 4,152 predictions left, which need about 3.1 more GPU-hours, so about 17.8 in total. The stop grace period adds up to about 0.6 GPU-hours past a cap. 20.0 covers both. Tokens (7.37 M of 12 M) and USD ($19.15 of $30) were well inside their caps and are unchanged.
+- **Stop and resume:** the cap was reached at 13:29:44 UTC (14.04 GPU-hours). The in-flight work ended at 13:34:44 UTC, when the stop grace period ran out, leaving 3,739 predictions and 14.68 GPU-hours spent. It resumed at 15:36:30 UTC. Predictions already written are kept. Items interrupted at the stop are rerun from the start, as the runner does on any resume.
+- **Who made the change:** Hemanath.
+- **Decision timing:** the raise was decided at 13:24 UTC and the 20.0 figure at 15:35 UTC on 2026-11-01. Both were decided while the H100 run was blind: no predictions unblinded, nothing scored, labels not loaded. The cap only decides whether the run finishes; it does not change how any prediction is made, budgeted or scored.
