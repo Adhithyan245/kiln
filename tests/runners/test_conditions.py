@@ -174,6 +174,19 @@ def test_cli_runs_one_seed_of_every_condition_and_requires_a_model(tmp_path: Pat
               "--items-file", str(items_file), "--frozen", str(partial)])
 
 
+def test_parallel_runs_each_condition_seed_in_its_own_process(tmp_path: Path) -> None:
+    items_file = tmp_path / "items.jsonl"
+    write_items_file(items_file, ITEMS)
+    runs = tmp_path / "runs"
+    args = ["--split", "dev", "--all-conditions", "--seed", "0", "--model", "offline", "--stubs",
+            "--items-file", str(items_file), "--limit", "2", "--runs-dir", str(runs), "--parallel", "4"]
+    assert main(args) == 0
+    for c in ["C1", "C2", "C3", "C4"]:
+        assert [p["item_id"] for p in jsonl(runs / run_id_for(c, "offline", 0, "dev") / "predictions.jsonl")] == ["T-0", "T-1"]
+    assert main(args) == 0          # rerun resumes: nothing predicted twice
+    assert all(len(jsonl(p)) == 2 for p in runs.glob("*/predictions.jsonl"))
+
+
 class Crasher(Agent):
     name = "thermo"
 

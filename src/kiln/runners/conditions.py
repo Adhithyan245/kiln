@@ -354,6 +354,36 @@ def _git_sha() -> str:
 CAP_KEYS = ("max_tool_calls_per_item", "max_tokens_per_item", "max_compute_units_per_item")
 
 
+def _run_parallel(argv: Sequence[str], conditions: Sequence[str], seeds: Sequence[int], workers: int) -> int:
+    """Each condition/seed in its own `python -m kiln.runners.conditions` process, in plan order
+    (seed-major), at most `workers` at a time. Each child holds its run's lock and resumes per item."""
+    base, skip = [], False
+    for arg in argv:  # drop the selection and --parallel flags; each child gets exactly one run
+        if skip:
+            skip = False
+        elif arg in ("--condition", "--seed", "--parallel"):
+            skip = True
+        elif arg not in ("--all-conditions", "--all-seeds") and not arg.startswith(("--condition=", "--seed=", "--parallel=")):
+            base.append(arg)
+    queue = [(c, s) for s in seeds for c in conditions]
+    running: list[tuple[str, subprocess.Popen]] = []
+    failed: list[str] = []
+    while queue or running:
+        while queue and len(running) < workers:
+            c, s = queue.pop(0)
+            cmd = [sys.executable, "-m", "kiln.runners.conditions", *base, "--condition", c, "--seed", str(s)]
+            running.append((f"{c}-s{s}", subprocess.Popen(cmd)))
+        time.sleep(1)
+        for name, proc in list(running):
+            if proc.poll() is not None:
+                running.remove((name, proc))
+                if proc.returncode != 0:
+                    failed.append(f"{name} (exit {proc.returncode})")
+    if failed:  # rerunning resumes every unfinished run; nothing is lost
+        raise SystemExit(f"runs that did not finish: {', '.join(failed)}")
+    return 0
+
+
 def _read_frozen(path: Path) -> dict[str, Any]:
     if not path.exists():
         raise SystemExit(f"{path} not found: it is written at the freeze; refusing to run with unfrozen settings")
@@ -387,6 +417,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--stubs", action="store_true", help="use the stand-ins; results are marked and never "
                                                              "experiment results")
     parser.add_argument("--runs-dir", type=Path, default=Path("runs"))
+    parser.add_argument("--parallel", type=int, default=1,
+                        help="run up to N condition/seed runs at once, each in its own process (default 1: in sequence)")
     args = parser.parse_args(argv)
 
     conditions = list(CONDITIONS) if args.all_conditions else (args.condition or parser.error("give --condition or --all-conditions"))
@@ -402,6 +434,8 @@ def main(argv: list[str] | None = None) -> int:
     items = sorted(items, key=lambda i: i.item_id)[: args.limit] if args.limit else items
     extra: dict[str, Any] = {k: frozen[k] for k in ("tier_prices", *CAP_KEYS) if frozen and k in frozen}
     # One seed of every condition first, so a partial night is still a valid comparison (plan R2).
+    if args.parallel > 1:
+        return _run_parallel(argv if argv is not None else sys.argv[1:], conditions, seeds, args.parallel)
     for seed in seeds:
         for condition in conditions:
             cfg = RunConfig(run_id=run_id_for(condition, args.model, seed, args.split), condition=condition,
