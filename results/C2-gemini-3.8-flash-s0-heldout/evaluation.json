@@ -15546,6 +15546,8 @@
     "available": false,
     "reason": "Unavailable: no per-item margins and margin threshold were supplied."
   },
+  "invalid": true,
+  "invalid_reason": "Executed with KILN_COMPUTE_BACKEND=stub (fake energies, model: stub). Declared invalid in protocol/amendments.md on 2026-11-01. Do not use, cite, or present.",
   "metrics": {
     "auroc": 0.6862585034013605,
     "brier": 0.2741760786544251,
@@ -15603,5 +15605,6 @@
     "reacted_means": "completely_reacted only"
   },
   "source": "precursor_genome",
-  "split": "heldout"
+  "split": "heldout",
+  "status": "INVALID_STUB_BACKEND_DEFECT"
 }

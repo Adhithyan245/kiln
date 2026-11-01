@@ -78,3 +78,21 @@ The code items in `protocol.md` §17 table 2 (OPEN-23, OPEN-24, and the `evaluat
   The H100 run paused at 09:29 UTC after reaching 2,953 / 4,152 predictions when cumulative GPU time across 12 concurrent workers reached the 8.0 GPU-hour cap. The 8.0-hour cap was originally copied from the GB10 plan (where stubs spent 0 GPU-seconds). Because real parallel relaxations consume concurrent GPU time across parallel workers, the cap was increased to 14.0 GPU-hours via `~/kiln-h100/night2-h100-resume.toml` to allow completion of the remaining ~1,196 items.
 - **Who made the change:** Hemanath and Adhi.
 - **Decision timing:** Decided on 2026-11-01 **before unblinding or scoring of the H100 run**. The H100 run remains blinded; labels will only be loaded after the H100 run finishes and its prediction manifest hash is independently verified in #kiln-receipts.
+
+### 2026-11-01: GB10 rerun with local compute backend launched as replication of adopted H100 result
+
+A GB10 rerun with real compute started on 2026-11-01 at 12:57:47Z.
+
+- **Configuration:**
+  - Code: frozen code `040f65d129 0d9ebadfd6 4ef33e6528 572bff923b` (`040f65d`), containing Gate P commit `c283468633 4c6bc768fd 0654a220b9 0df8b4985c`.
+  - Settings & data: `protocol/frozen_settings.json`, agent-visible items file `~/kiln-items.jsonl` (SHA-256 `0a97babfab 2f2ce4d345 9b8e9d83ba 1f2544acf5 0feb3687be f0e47afd17 f663`), and Materials Project cache in `~/kiln/cache/` (digest `e12434966d c3b24f5a89 b48de7b51c 6bfaec739e 3717df3d0a 6499351de3 96a453`).
+  - Only change: `KILN_COMPUTE_BACKEND=local`, confirmed set in the live process environment.
+- **Cache purge & validation:**
+  - Before launch, the invalid stub run's outputs and the 1,045 fake cache entries were quarantined and moved to `~/kiln/stub-invalid-20261101/`. Because compute cache keys do not embed the backend name, moving them was required to ensure no stub results are reused.
+  - A 2-item dry run check before launching verified real calculation results: `materials_project` lookups, `medium-mpa-0` single-point taking 5.0 GPU-s, and bounded relaxation taking 410.8 GPU-s.
+- **Role and status:**
+  - The GB10 rerun serves as a secondary replication of the adopted H100 result. It will be reported in its own table and is never used to select or pool results.
+  - Expected completion is between 16:00 and 17:00 UTC (noon to 1:00 PM Eastern).
+- **Who made the change:** Adhi and Hemanath.
+- **Decision timing:** Decided and recorded on 2026-11-01 while the GB10 rerun and H100 run are both in progress, before either run's predictions are unblinded or scored.
+
