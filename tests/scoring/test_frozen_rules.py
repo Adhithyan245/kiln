@@ -376,7 +376,7 @@ def test_real_specialists_through_verifier_to_frozen_score(tmp_path):
     item = Item(item_id="example", source="alab_demo", precursor_a="CaCO3", precursor_b="TiO2",
                 temperature_c=900, melting_point_a_c=825, melting_point_b_c=1843, split="dev")
     try:
-        for agent in (Thermo(), Precursor(), Kinetics()):
+        for agent in (Thermo(config=config), Precursor(config=config), Kinetics(config=config)):
             agent.step(item, board, budget)
         requests = [ComputeRequest.model_validate_json(line)
                     for line in service.log_path.read_text().splitlines()]

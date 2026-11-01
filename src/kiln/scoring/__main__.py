@@ -296,7 +296,7 @@ def main(
         print(_redact(f"Scoring failed: {type(exc).__name__}: {exc}", env), file=sys.stderr)
         return 1
     result = {
-        "run": {"run_id": run_id, "run_dir": str(args.run_dir), "manifest_sha256": verifier.manifest_sha256,
+        "run": {"run_id": run_id, "run_dir": args.run_dir.as_posix(), "manifest_sha256": verifier.manifest_sha256,
                 "verification": args.verify, "message_id": verifier.message_id},
         **result,
     }
