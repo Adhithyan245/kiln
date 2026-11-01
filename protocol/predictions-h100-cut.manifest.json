@@ -1,0 +1,16 @@
+{
+  "files": {
+    "runs-h100-cut/C1-gemini-3.8-flash-s0-heldout/predictions.jsonl": "58b9b21d1e0c8b57535f2095f7b2f7914edf01fdeafc033863fc17f3b7f5ba3d",
+    "runs-h100-cut/C1-gemini-3.8-flash-s1-heldout/predictions.jsonl": "900eae03295a884127b5870d185556efc1ce3bee56109170a2ce08423c10c6e9",
+    "runs-h100-cut/C1-gemini-3.8-flash-s2-heldout/predictions.jsonl": "06271c4fac25ba4ba64dcd1df8924fc11f65544fbd98baa4a1ba4aa52d9dd82e",
+    "runs-h100-cut/C2-gemini-3.8-flash-s0-heldout/predictions.jsonl": "061c225ed954bf601f525994c9109409458743f76d91b11a7312b01c987451b4",
+    "runs-h100-cut/C2-gemini-3.8-flash-s1-heldout/predictions.jsonl": "6b052034bdf067c6b1730dc96ca6351ca5ce138271a6d162f7a1fea7ade068ef",
+    "runs-h100-cut/C2-gemini-3.8-flash-s2-heldout/predictions.jsonl": "8440f7d93faeabc8ebcb8d0e0435df0f602cf4a245c745460165105006ebb3f0",
+    "runs-h100-cut/C3-gemini-3.8-flash-s0-heldout/predictions.jsonl": "be2b9f68f22c00f771d00f2ed736c6755f268b5e8f75f2b236c4b7b0fb18b7e8",
+    "runs-h100-cut/C3-gemini-3.8-flash-s1-heldout/predictions.jsonl": "a0c9dbe315897c27fe4f21a5b043923b399a4ee6e6bf809a4ca51b6cfb47e797",
+    "runs-h100-cut/C3-gemini-3.8-flash-s2-heldout/predictions.jsonl": "5b78e75d7b0680e1b71a23a1c37b3deac596a0976c020f0d3d5773270cb748f0",
+    "runs-h100-cut/C4-gemini-3.8-flash-s0-heldout/predictions.jsonl": "82e81fdfec5afaa5c80340c47a3d759450619610641b5bcc3a989427317e50fb",
+    "runs-h100-cut/C4-gemini-3.8-flash-s1-heldout/predictions.jsonl": "4fb3459441aff77be94d90328a43f5da2164a08ef7b91926b01c09ec154d354a",
+    "runs-h100-cut/C4-gemini-3.8-flash-s2-heldout/predictions.jsonl": "09d5a131d1bb741b1958511fb8cef7ab7b7d909d1c3fc2c9ed7d2c146b299c9a"
+  }
+}

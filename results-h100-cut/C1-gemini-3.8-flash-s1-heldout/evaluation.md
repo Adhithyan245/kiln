@@ -1,0 +1,33 @@
+## Kiln evaluation: C1-gemini-3.8-flash-s1-heldout
+
+Split heldout, source precursor_genome, n = 301. Predictions sha256 `900eae03295a884127b5870d185556efc1ce3bee56109170a2ce08423c10c6e9`; manifest sha256 `9cb24cb49164521029690d2a3625d0b1591a9089251d6bdd36141237cd915264` confirmed as posted by `discord` (message 1566485753733578907).
+
+| Metric (all pairs, flagged included) | Value |
+|---|---|
+| AUROC (reacted vs not) | 0.713 |
+| Brier | 0.174 |
+| Four-class accuracy | 0.386 |
+| Four-class macro-F1 | 0.166 |
+| Coverage (unflagged share) | 0.259 |
+| Flagged accuracy (n = 216) | 0.375 |
+| Unflagged accuracy (n = 77) | 0.416 |
+
+| Class | Support | Predicted | F1 |
+|---|---|---|---|
+| unreacted | 122 | 273 | 0.562 |
+| transformed | 100 | 8 | 0.000 |
+| partially_reacted | 28 | 12 | 0.100 |
+| completely_reacted | 43 | 0 | 0.000 |
+
+| Compute tier | Requests | Compute units | GPU-seconds | Moved toward label (known) |
+|---|---|---|---|---|
+| cached_lookup | 301 | 30.10 | 0.0 | 0 (0) |
+| single_point | 7 | 7.00 | 47.5 | 0 (0) |
+| bounded_relaxation | 0 | 0.00 | 0.0 | 0 (0) |
+| decomposition_reeval | 8 | 1.60 | 0.0 | 0 (0) |
+| **total** | 316 | 38.70 | 47.5 | 0 (0) |
+
+- Hard subset: Unavailable: no per-item margins and margin threshold were supplied.
+- Bootstrap intervals: Unavailable: an agreed and validated bootstrap method for overlapping precursor clusters is required.
+- Correct changes: Unavailable: no agreed definition; changed_prediction is OPEN-17 and extra allocation tables are OPEN-14.
+- Review flags are flags, not calibrated probabilities or validated failure causes.
