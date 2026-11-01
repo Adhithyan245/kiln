@@ -17,6 +17,19 @@ DEFAULT_LEDGER = Path(__file__).resolve().parents[3] / "data/raw/ledger_precurso
 SPLIT_SEED = 42
 HELDOUT_PRECURSORS = 9
 
+# synthesis.heating_time is in MINUTES; Item.dwell_h is hours. Source (documentation only, no
+# outcomes read): the dataset paper, The Precursor Genome, arXiv:2607.09903v1. Its ledger schema
+# table documents the field as "heating_time_min float", and its methods give the default
+# profile as "... up to the maximum dwell temperature, followed by a 1-hour hold" (60 min).
+HEATING_TIME_UNIT = "min"
+MINUTES_PER_HOUR = 60
+HEATING_TIME_SOURCE = (
+    "The Precursor Genome, arXiv:2607.09903v1 (https://arxiv.org/pdf/2607.09903): ledger schema field "
+    "'heating_time_min float'; methods: default profile ends with 'a 1-hour hold'"
+)
+# Recorded in ItemProvenance.fields_used next to "synthesis.heating_time" for every converted item.
+DWELL_PROVENANCE = f"dwell_h = synthesis.heating_time / {MINUTES_PER_HOUR} (minutes to hours; source: {HEATING_TIME_SOURCE})"
+
 
 class LedgerError(ValueError):
     """Ledger problem whose message names fields only, never ledger values."""
@@ -155,6 +168,8 @@ def ingest(path: str | Path = DEFAULT_LEDGER, *, seed: int = SPLIT_SEED) -> tupl
 
     Exactly nine precursors are sampled across first-element groups. The same
     ledger and seed give the same selection regardless of sample order.
+    ``dwell_h`` is ``synthesis.heating_time`` converted from minutes to hours
+    (see ``HEATING_TIME_SOURCE``); it is None when the ledger has no heating time.
     """
     path = Path(path)
     with path.open(encoding="utf-8") as stream:
@@ -197,10 +212,16 @@ def ingest(path: str | Path = DEFAULT_LEDGER, *, seed: int = SPLIT_SEED) -> tupl
             raise LedgerRecordError(index, "has a missing or duplicate sample_id")
         ids.add(item_id)
         formulas.update(names)
-        if synthesis.get("heating_time") is not None:
+        dwell_h = synthesis.get("heating_time")
+        if dwell_h is not None:
             fields.append("synthesis.heating_time")
+            # Strings and booleans are refused rather than coerced, so no value skips the conversion.
+            if not isinstance(dwell_h, (int, float)) or isinstance(dwell_h, bool):
+                raise LedgerRecordError(index, "has a non-numeric synthesis.heating_time")
+            dwell_h = dwell_h / MINUTES_PER_HOUR
+            fields.append(DWELL_PROVENANCE)
         values = dict(item_id=item_id, source="precursor_genome", precursor_a=names[0], precursor_b=names[1],
-                      temperature_c=synthesis.get("heating_temperature"), dwell_h=synthesis.get("heating_time"),
+                      temperature_c=synthesis.get("heating_temperature"), dwell_h=dwell_h,
                       melting_point_a_c=precursors[0].get("melting_point_c"), melting_point_b_c=precursors[1].get("melting_point_c"))
         records.append((values, fields))
     selected = _heldout(formulas, seed)
