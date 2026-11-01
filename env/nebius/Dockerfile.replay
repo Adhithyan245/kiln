@@ -1,0 +1,11 @@
+# The Kiln triage app in replay mode: standard-library Python, the committed Night 2 runs, no keys,
+# live mode off (KILN_LIVE is never set). Built by env/nebius/deploy_app.sh from `git archive` of a commit.
+FROM python:3.12-slim
+WORKDIR /kiln
+COPY repo/ /kiln/
+# Optional agent-visible items file (temperatures for recorded pairs); never committed, private registry only.
+COPY items/ /items/
+ENV PORT=8080 KILN_ITEMS=/items/kiln-items.jsonl PYTHONUNBUFFERED=1
+EXPOSE 8080
+USER nobody
+CMD ["python3", "app/server.py"]

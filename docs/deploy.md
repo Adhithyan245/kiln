@@ -59,10 +59,27 @@ docker run -d -p 8080:8080 --name kiln-app kiln-app
 
 The image copies `runs/` and `runs-h100/` at build time, so rebuild after new results are pushed.
 
+## Option C: Nebius Serverless AI endpoint (managed HTTPS, what the demo link uses)
+
+```bash
+export NEBIUS_PROJECT_ID=<project> KILN_REGISTRY=cr.<region>.nebius.cloud/<registry id>
+export KILN_ITEMS=~/kiln-items.jsonl            # optional; never committed, baked only into the private image
+bash env/nebius/deploy_app.sh [COMMIT]           # default HEAD
+```
+
+`env/nebius/deploy_app.sh` builds `env/nebius/Dockerfile.replay` from `git archive COMMIT` (committed code and
+runs only), refuses an image that isn't in replay mode, pushes it to the Nebius registry as `:<commit>` and
+`:live`, then restarts the `kiln-triage` endpoint (which pulls `:live`) or creates it on a small CPU
+(`cpu-d3`, 2 vCPU) the first time. The `https://…nebius.cloud` URL stays the same across redeploys, so
+**redeploying after new results or a new UI is one command**. Registry auth goes through
+`docker-credential-nebius` and your CLI sign-in; no token is handled. After judging,
+`bash env/nebius/teardown.sh --vm kiln-app --registry kiln` removes the endpoint, the VM and the registry
+(it asks before each delete). Nebius public IPs pass port 80 but not 8080, which is why the backup VM serves on 80.
+
 ## Updating with new results
 
 Results land on `dev` as `runs-h100/` (H100) and `runs/` (GB10 rerun). For Option A, `git pull` is enough:
-the server re-reads the run folders on every request.
+the server re-reads the run folders on every request. For Option C, rerun `bash env/nebius/deploy_app.sh`.
 
 ## Checks before sharing the link
 
