@@ -176,11 +176,18 @@ def test_default_discord_fetch_uses_webhook_and_never_prints_it(tmp_path, capsys
 
 def test_bad_label_line_reports_field_names_only(tmp_path, capsys):
     _, message = build_repo(tmp_path)
+    # An unmapped stored category fails closed (OPEN-11) without echoing the value.
     (tmp_path / "fake_labels.jsonl").write_text('{"item_id": "syn-0", "category": "PRIVATE-CATEGORY", "reacted": true}\n')
     assert cli.main(argv(tmp_path), confirm=fake_discord(message), environ={}) == 1
     err = capsys.readouterr().err
-    assert "labels line 1 failed Label validation for category" in err
+    assert "labels line 1: the stored category is not one of the documented names" in err
     assert "PRIVATE-CATEGORY" not in err
+    # Any other bad field is named, never quoted.
+    (tmp_path / "fake_labels.jsonl").write_text('{"item_id": ["PRIVATE-ID"], "category": "unreacted"}\n')
+    assert cli.main(argv(tmp_path), confirm=fake_discord(message), environ={}) == 1
+    err = capsys.readouterr().err
+    assert "labels line 1 failed Label validation for item_id" in err
+    assert "PRIVATE-ID" not in err
 
 
 def test_module_entry_point_help():
