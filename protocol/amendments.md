@@ -11,7 +11,7 @@ Gate P has not happened. `protocol/protocol.md` is still a draft and has not bee
 | Gate P commit (full SHA, pushed to `dev`) | not yet |
 | SHA-256 of `git cat-file blob <gate-p-commit>:protocol/protocol.md` | not yet |
 | Posted where and when (channel per OPEN-16, `protocol.md` §10) | not yet |
-| Receipt independently verified by (Adhi; Hemanath for any post Adhi makes, `protocol.md` §10) | not yet |
+| Posted by Adhi; receipt independently checked by Hemanath (`protocol.md` §10) | not yet |
 | P2 code-freeze commit (`protocol.md` §10) | `d9a2993` (full SHA in `protocol.md` §10); re-recorded here if a later code or settings commit lands after the Gate P commit and before Night 2 |
 
 ## Before the Gate P commit (not amendments)
@@ -32,7 +32,7 @@ The code items in `protocol.md` §17 table 2 (OPEN-23, OPEN-24, and the `evaluat
 - P2: recorded in `protocol.md` §10 (`d9a2993`). Only a re-recording after the Gate P commit goes here.
 - OPEN-18: the `python -m kiln.data` rerun. A mismatch with the `protocol.md` §2.3 list is recorded here.
 - OPEN-22: the dataset attribution text.
-- OPEN-16: the name of the dedicated posting channel, separate from #kiln-alerts, and who can read it (CJ), and Adhi's agreement to check receipts. These are needed before the P3 post.
+- OPEN-16: the dedicated receipts channel, #kiln-receipts, separate from #kiln-alerts; Adhi posts and Hemanath checks each post. These are needed before the P3 post.
 - OPEN-19: opaque item ids, only if that code lands before the held-out runs.
 
 ## Amendments
