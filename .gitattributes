@@ -5,3 +5,4 @@ runs/** -text
 protocol/*.manifest.json -text
 protocol/posts*.jsonl -text
 protocol/frozen_settings.json -text
+stub-invalid-*/** -text

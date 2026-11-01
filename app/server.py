@@ -19,13 +19,25 @@ def _jsonl(path: Path) -> list[dict]:
                 if isinstance(value := json.loads(line), dict)]
 
 
+# Real Night 2 runs only: the GB10 run (runs/) and the H100 replication (runs-h100/). Development dry
+# runs are not shown: they used the stub compute backend.
+RUN_SOURCES = {"runs": "GB10 (DGX Spark)", "runs-h100": "H100 (ALCHEMI Toolkit)"}
+
+
+def _uses_stub_compute(run_dir: Path) -> bool:
+    """A run whose compute results came from the stub backend has fake energies: never show it."""
+    return any((request.get("result") or {}).get("model") == "stub"
+               for request in _jsonl(run_dir / "compute_requests.jsonl"))
+
+
 def load_predictions() -> list[dict]:
     """Load run outputs once per run, keeping only agent-visible and prediction fields."""
     predictions = []
-    paths = list((ROOT / "runs").glob("*/predictions.jsonl"))
-    paths += list((ROOT / "results" / "gb10").glob("dryrun_*/*/predictions.jsonl"))
+    paths = [path for folder in RUN_SOURCES for path in (ROOT / folder).glob("*/predictions.jsonl")]
     for path in sorted(paths):
         run_dir = path.parent
+        if _uses_stub_compute(run_dir):
+            continue
         config_path = run_dir / "config.json"
         config = json.loads(config_path.read_text(encoding="utf-8")) if config_path.is_file() else {}
         artifacts: dict[str, dict[str, dict]] = defaultdict(dict)
@@ -45,7 +57,7 @@ def load_predictions() -> list[dict]:
                 continue
             row = {key: prediction.get(key) for key in ("run_id", "condition", "seed", "item_id", "category", "p_react", "cause", "fix", "evidence", "review_flags", "needs_review", "disagreements", "applicability_notes", "cost")}
             row["run_id"] = row["run_id"] or run_dir.name
-            row["source_label"] = "Development dry run" if "dryrun_" in run_dir.parent.name else "Recorded run"
+            row["source_label"] = RUN_SOURCES.get(run_dir.parent.name, "Recorded run")
             row["artifacts"] = list(artifacts[item_id].values())
             row["requests"] = list(requests[item_id].values())
             row["stubs_used"] = config.get("stubs_used")

@@ -23,6 +23,22 @@ def test_viewer_limits_fields_and_escapes_embedded_json(tmp_path):
     assert '"stubs_used": true' in page
 
 
+def test_viewer_hides_stub_compute_runs_and_labels_machines(tmp_path):
+    spec = importlib.util.spec_from_file_location("kiln_viewer_stub", Path(__file__).parents[1] / "app" / "server.py")
+    viewer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(viewer)
+    viewer.ROOT = tmp_path
+    for folder, run, model in (("runs", "fake", "stub"), ("runs-h100", "real", "medium-mpa-0")):
+        d = tmp_path / folder / run
+        d.mkdir(parents=True)
+        (d / "predictions.jsonl").write_text(json.dumps({"item_id": f"PG_{run}", "run_id": run}) + "\n", encoding="utf-8")
+        (d / "compute_requests.jsonl").write_text(json.dumps({"item_id": f"PG_{run}", "request_id": "r1",
+            "tier": "single_point", "result": {"model": model}}) + "\n", encoding="utf-8")
+    rows = viewer.load_predictions()
+    assert [r["item_id"] for r in rows] == ["PG_real"]           # the stub-backend run is never shown
+    assert rows[0]["source_label"] == "H100 (ALCHEMI Toolkit)"
+
+
 def test_empty_viewer_renders(tmp_path):
     spec = importlib.util.spec_from_file_location("kiln_viewer_empty", Path(__file__).parents[1] / "app" / "server.py")
     viewer = importlib.util.module_from_spec(spec)
