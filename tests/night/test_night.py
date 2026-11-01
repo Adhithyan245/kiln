@@ -81,6 +81,35 @@ def test_night2_pushes_before_the_label_steps_and_stops_there() -> None:
     assert plan.step("manifest").depends_on == ["finalize"]
 
 
+def test_h100_replication_never_writes_where_the_gb10_run_does() -> None:
+    gb10, h100 = load_plan(PLANS / "night2.toml"), load_plan(PLANS / "night2-h100.toml")
+    assert h100.caps.complete() and h100.labels_must_be_absent
+    assert (h100.gate.receipt, h100.gate.manifest) == ("protocol/posts-h100.jsonl", "protocol/predictions-h100.manifest.json")
+    for name in ("run_conditions", "finalize", "manifest"):
+        cmd = h100.step(name).cmd
+        assert cmd[cmd.index("--runs-dir") + 1] == "runs-h100"
+    assert "--out" in h100.step("manifest").cmd and "protocol/predictions-h100.manifest.json" in h100.step("manifest").cmd
+    assert "protocol/posts-h100.jsonl" in h100.step("post_hash").cmd
+    shared = {"runs", "protocol/posts.jsonl", "protocol/predictions.manifest.json"}
+    assert not shared & {a for s in h100.steps for a in s.cmd}             # no GB10 output path anywhere
+    assert h100.step("run_conditions").env == ["GEMINI_API_KEY_2"]
+    same = lambda plan: [a for a in plan.step("run_conditions").cmd if a not in ("--runs-dir", "runs-h100")]  # noqa: E731
+    assert same(h100) == same(gb10)                                          # same experiment otherwise
+    order = [s.name for s in h100.order()]
+    assert order.index("finalize") < order.index("manifest") < order.index("post_hash") < order.index("push")
+
+
+def test_h100_preflight_requires_the_second_gemini_account(tmp_path: Path, monkeypatch) -> None:
+    import subprocess
+
+    code = load_plan(PLANS / "night2-h100.toml").step("preflight").cmd[2]
+    env = {k: v for k, v in __import__("os").environ.items() if not k.startswith("GEMINI_API_KEY")}
+    run = lambda extra: subprocess.run([sys.executable, "-c", code], env={**env, **extra}, capture_output=True)  # noqa: E731
+    assert run({"GEMINI_API_KEY_2": "x"}).returncode == 0
+    assert run({"GEMINI_API_KEY_2": "x", "GEMINI_API_KEY": "y"}).returncode != 0
+    assert run({}).returncode != 0
+
+
 def test_on_fail_stop_alerts_and_stops_the_night(tmp_path: Path) -> None:
     plan = make_plan([{"name": "a", "cmd": touch("a")},
                       {"name": "b", "cmd": py("raise SystemExit(3)"), "depends_on": ["a"], "retries": 0,

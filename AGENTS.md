@@ -20,11 +20,18 @@ Kiln is an auditable, budget-aware triage system for solid-state reactions. Spec
 
 ## How we build
 - **The plan is the Final Build Plan plus `docs/plan-changes.md`.** Every change listed there as approved is part of the plan, not a deviation; anything listed as proposed is out of scope until approved. Settings and their evidence are in `docs/compute-decisions.md`. When the team agrees a new change, add a row to `docs/plan-changes.md` in the same commit.
-- **One complete example first.** Until the 11 AM Saturday vertical slice works (one development pair through agents → GB10 request → verifier → score → evidence card), prefer wiring things together over adding features.
+- **Freeze discipline.** The vertical slice works end to end (live dry runs on the GB10). From the protocol hash on, nothing that decides how a prediction is made, budgeted or scored changes (protocol §17); a problem found after the hash is recorded as a dated entry in `protocol/amendments.md`, never fixed silently.
 - Read `docs/interfaces.md`. All data passed between modules uses `src/kiln/schemas.py`. Don't add fields without a commit that updates both files.
-- Only edit files in **your own folders** (below). If you need a change elsewhere, ask the owner.
+- Only edit files in **your own folders** (below). If you need a change elsewhere, ask the owner. When the owner or Adhi asks someone else to make it, the commit message says whose task it was (for example "done on Annamayya's behalf at Adhi's request").
 - **Sharing the GB10:** one job at a time; experiment runs (Night 2) take priority over profiling and benchmarks. Check `nvidia-smi` and the team queue before starting a GPU job.
 - Start each task by writing a short plan and waiting for the human's OK.
+
+## Night 2 facts
+- The run reads `protocol/frozen_settings.json` and runs every condition and seed at once (`--parallel 12`), then the OPEN-23 finalize step, then the manifest and the hash post (`src/kiln/night/plans/night2.toml`, `docs/plan-changes.md` rows 22–25).
+- **One operator launches.** Everyone else only watches `#kiln-alerts`; two launches of the same plan would compete for the same runs.
+- On the GB10, the Gemini key and the two webhooks live in `~/.bashrc` and load only in interactive shells: inside `tmux` run `source ~/.bashrc`, and run scripts with `bash -i`. Never print them.
+- Labels never go to either run machine.
+- **Two machines** (`docs/plan-changes.md` row 27): the full experiment runs on the GB10 (**primary**) and again on an H100 (separate replication, set up by Hemanath). The H100 writes to `runs-h100/`, `protocol/predictions-h100.manifest.json` and `protocol/posts-h100.jsonl`, so the two never overwrite each other when results are combined, and it uses the second Gemini account's key.
 
 ## Ownership
 | Folder / file | Owner |

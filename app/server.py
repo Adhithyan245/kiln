@@ -1,68 +1,67 @@
-"""Read-only Kiln evidence viewer for recorded runs; no label access."""
-
+"""Read-only Kiln evidence viewer for recorded predictions; never reads labels."""
 from __future__ import annotations
 
-import html
 import json
 import os
+from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(os.environ.get("KILN_ROOT", Path(__file__).resolve().parents[1]))
+TEMPLATE = Path(__file__).with_name("index.html")
+
+
+def _jsonl(path: Path) -> list[dict]:
+    if not path.is_file():
+        return []
+    with path.open(encoding="utf-8") as stream:
+        return [value for line in stream if line.strip()
+                if isinstance(value := json.loads(line), dict)]
 
 
 def load_predictions() -> list[dict]:
+    """Load run outputs once per run, keeping only agent-visible and prediction fields."""
     predictions = []
-    for path in sorted((ROOT / "runs").glob("*/predictions.jsonl")):
-        with path.open(encoding="utf-8") as stream:
-            for line in stream:
-                if line.strip():
-                    data = json.loads(line)
-                    if isinstance(data, dict):
-                        data["_run_dir"] = path.parent.name
-                        predictions.append(data)
+    paths = list((ROOT / "runs").glob("*/predictions.jsonl"))
+    paths += list((ROOT / "results" / "gb10").glob("dryrun_*/*/predictions.jsonl"))
+    for path in sorted(paths):
+        run_dir = path.parent
+        config_path = run_dir / "config.json"
+        config = json.loads(config_path.read_text(encoding="utf-8")) if config_path.is_file() else {}
+        artifacts: dict[str, dict[str, dict]] = defaultdict(dict)
+        requests: dict[str, dict[str, dict]] = defaultdict(dict)
+        for artifact_path in sorted((run_dir / "board").rglob("artifacts.jsonl")):
+            for artifact in _jsonl(artifact_path):
+                if artifact.get("item_id") and artifact.get("artifact_id"):
+                    artifacts[artifact["item_id"]][artifact["artifact_id"]] = {
+                        key: artifact.get(key) for key in ("artifact_id", "agent", "type", "values", "rationale", "verifier", "verifier_notes")}
+        for request in _jsonl(run_dir / "compute_requests.jsonl"):
+            if request.get("item_id") and request.get("request_id"):
+                requests[request["item_id"]][request["request_id"]] = {
+                    key: request.get(key) for key in ("request_id", "agent", "tier", "reason", "inputs", "status", "compute_units", "gpu_seconds")}
+        for prediction in _jsonl(path):
+            item_id = prediction.get("item_id")
+            if not item_id:
+                continue
+            row = {key: prediction.get(key) for key in ("run_id", "condition", "seed", "item_id", "category", "p_react", "cause", "fix", "evidence", "review_flags", "needs_review", "disagreements", "applicability_notes", "cost")}
+            row["run_id"] = row["run_id"] or run_dir.name
+            row["source_label"] = "Development dry run" if "dryrun_" in run_dir.parent.name else "Recorded run"
+            row["artifacts"] = list(artifacts[item_id].values())
+            row["requests"] = list(requests[item_id].values())
+            row["stubs_used"] = config.get("stubs_used")
+            row["stub_parts"] = config.get("stub_parts", [])
+            predictions.append(row)
     return sorted(predictions, key=lambda p: not bool(p.get("needs_review")))
 
 
 def render() -> str:
-    cards = []
-    for row in load_predictions():
-        def esc(value: object) -> str:
-            return html.escape(str(value))
-        details = {k: row.get(k) for k in ("category", "p_react", "cause", "evidence", "compute_requests",
-            "review_flags", "disagreements", "applicability_notes", "cost")}
-        run_dir = ROOT / "runs" / row["_run_dir"]
-        artifact_paths = sorted((run_dir / "board").rglob("artifacts.jsonl"))
-        for title, paths in (("artifacts", artifact_paths),
-                             ("calculation_log", [run_dir / "compute_requests.jsonl"])):
-            records = {}
-            for path in paths:
-                if path.is_file():
-                    with path.open(encoding="utf-8") as stream:
-                        for line in stream:
-                            if not line.strip():
-                                continue
-                            record = json.loads(line)
-                            if record.get("item_id") == row.get("item_id"):
-                                key = record.get("artifact_id") or record.get("request_id")
-                                if key:
-                                    records[key] = record
-            details[title] = list(records.values())
-        cards.append(f"<article><h2>{esc(row.get('item_id', 'unknown'))}</h2>"
-                     f"<strong>{'Needs review' if row.get('needs_review') else 'No review flag'}</strong>"
-                     f"<pre>{esc(json.dumps(details, indent=2, ensure_ascii=False))}</pre></article>")
-    content = ''.join(cards) or '<p>No recorded predictions are available yet.</p>'
-    return ("<!doctype html><html><head><meta charset='utf-8'><title>Kiln Triage</title>"
-            "<style>body{font:16px system-ui;margin:3rem auto;max-width:900px;padding:0 1rem}"
-            "article{border:1px solid #bbb;border-radius:8px;padding:1rem;margin:1rem 0}"
-            "pre{white-space:pre-wrap;overflow-wrap:anywhere}</style></head><body>"
-            "<h1>Kiln Triage</h1><p>Retrospective evaluation on public data. Flags indicate evidence requiring review.</p>"
-            + content + "</body></html>")
+    payload = json.dumps(load_predictions(), ensure_ascii=True).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+    return TEMPLATE.read_text(encoding="utf-8").replace("__KILN_DATA__", payload)
 
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
-        if self.path != "/":
+        if self.path not in ("/", "/index.html"):
             self.send_error(404)
             return
         try:
