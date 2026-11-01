@@ -5,7 +5,8 @@ WORKDIR /kiln
 COPY repo/ /kiln/
 # Optional agent-visible items file (temperatures for recorded pairs); never committed, private registry only.
 COPY items/ /items/
-ENV PORT=8080 KILN_ITEMS=/items/kiln-items.jsonl PYTHONUNBUFFERED=1
+# KILN_HOST: the app binds 127.0.0.1 by default; the endpoint's managed HTTPS proxy is the public front.
+ENV PORT=8080 KILN_HOST=0.0.0.0 KILN_ITEMS=/items/kiln-items.jsonl PYTHONUNBUFFERED=1
 EXPOSE 8080
 USER nobody
 CMD ["python3", "app/server.py"]
