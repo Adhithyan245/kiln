@@ -18,9 +18,11 @@ from pathlib import Path
 ROOT = Path(os.environ.get("KILN_ROOT", Path(__file__).resolve().parents[1]))
 TEMPLATE = Path(__file__).with_name("index.html")
 
-# Real Night 2 runs only: the GB10 run (runs/) and the H100 replication (runs-h100/). Development dry
-# runs are not shown: they used the stub compute backend.
-RUN_SOURCES = {"runs": "GB10 (DGX Spark)", "runs-h100": "H100 (ALCHEMI Toolkit)"}
+# Real Night 2 runs only, adopted result first: the H100 run scored on 301 common items (runs-h100-cut/),
+# the full H100 run when it lands (runs-h100/), then the GB10 rerun (runs/). Development dry runs are not
+# shown: they used the stub compute backend.
+RUN_SOURCES = {"runs-h100-cut": "H100 (ALCHEMI Toolkit)", "runs-h100": "H100 (ALCHEMI Toolkit)",
+               "runs": "GB10 (DGX Spark)"}
 PREDICTION_KEYS = ("run_id", "condition", "seed", "item_id", "category", "p_react", "cause", "fix", "evidence",
                    "review_flags", "needs_review", "disagreements", "applicability_notes", "cost")
 ARTIFACT_KEYS = ("artifact_id", "agent", "type", "values", "rationale", "verifier", "verifier_notes", "created_at")

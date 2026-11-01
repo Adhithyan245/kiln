@@ -29,7 +29,33 @@ Built at the ScienceClaw hackathon (MIT Media Lab, Oct 30–Nov 1, 2026) by Adhi
 - Shared formats every module must follow: `docs/interfaces.md`
 - Branching and protection: `docs/github-setup.md`
 
-Run instructions, results and the demo link are added before the repo goes public on Sunday.
+## Results (Night 2, real compute)
+
+**Pre-registered verdict (protocol §8):** the primary endpoint is ΔAUROC = AUROC(C4) − AUROC(C1), averaged over 3 seeds. It is **+0.013**, so **"C4 ranked better than C1 on this held-out set."** All three seeds agree in sign (the seed spread is about 0.001). As pre-registered (OPEN-15), **no confidence interval or significance test is reported**: every pair belongs to two precursor clusters (a crossed design), and no resampling scheme has been validated for overlapping clusters. So no difference is called significant or general.
+
+H100 run with the NVIDIA ALCHEMI Toolkit, on the **301 held-out pairs that every run had finished** (a 16:15 UTC copy, declared in `protocol/amendments.md` before scoring; predictions hash posted to #kiln-receipts as message `1566485753733578907` before grading; all 12 files match). Mean of 3 seeds:
+
+| Condition | AUROC | Brier ↓ | 4-class accuracy | Compute units per run |
+|---|---|---|---|---|
+| C1 single agent | 0.713 | 0.173 | 0.388 | 55 |
+| C2 isolated specialists | 0.726 | 0.168 | 0.386 | 4,352 |
+| C3 central planner | 0.722 | 0.170 | 0.383 | 2,598 |
+| **C4 collective** | **0.726** | **0.168** | 0.386 | 4,352 |
+
+**What it means:**
+- C4 and C2 are identical, so coordination through the need board changed no decisions.
+- The specialist conditions bought about 80× more GPU compute than the single agent (they escalated about 69% of pairs to MACE relaxations, against about 5% for C1) for a small AUROC gain. **The single agent reaches about 98% of the AUROC at about 1% of the compute.**
+- Four-class accuracy is about 0.39 against 0.25 for chance.
+- Scores and logs: `results-h100-cut/`, `runs-h100-cut/`.
+
+**Integrity: locked before we looked.**
+- The protocol was hashed and posted before any held-out run: Gate P commit `c283468`, `protocol.md` digest `3ca68ee1…`.
+- Every prediction set was hashed and posted before grading.
+- The evaluator refuses to read labels until it verifies the posted hash.
+- **The first GB10 run silently used the stub compute backend** (`KILN_COMPUTE_BACKEND` defaulted to `stub`). We found it from the compute logs (`"model": "stub"`), not from the scores, and declared it invalid in `protocol/amendments.md` before scoring the H100 run. The runners now fail closed on a stub or unset backend, and the app refuses to show stub runs. The invalid run is kept, byte-exact, in `stub-invalid-20261101/`.
+- A GB10 (DGX Spark) rerun with real compute has all three C1 seeds complete; C2–C4 are still running (`runs/`).
+
+**App:** `app/` is an interactive triage app that replays any recorded held-out pair step by step: agent decisions, GPU calculations, convergence, and the result with review flags. Deployment: `docs/deploy.md`.
 
 ## Data and license
 
