@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import math
 
-from kiln.agents.base import Agent, llm_choose
+from kiln.agents.base import Agent, llm_call, llm_choose
+from kiln.agents.thermo import is_zero_energy
 from kiln.board import Board
 from kiln.budget import Budget
 from kiln.schemas import Artifact, Claim, Cost, Item, Need, RunConfig
@@ -76,20 +77,36 @@ class Kinetics(Agent):
             value = a.values.get("dE_ev_per_atom")
             if a.agent == "thermo" and isinstance(value, (float, int)) and not isinstance(value, bool):
                 before = budget.spent
-                recommended = "firm_up_energy" if 0 < abs(value) <= self.energy_margin else "skip"
-                options = (["skip"] if value == 0 else
-                           [recommended, "skip" if recommended != "skip" else "firm_up_energy"])
-                chosen = llm_choose(options, f"Rule recommends {recommended}; energy is {value} eV/atom. "
-                    f"Remaining budget: {budget.remaining()}.", budget, config,
+                zero = is_zero_energy(value)
+                recommended = "firm_up_energy" if not zero and abs(value) <= self.energy_margin else "skip"
+                # OPEN-07: a zero alone never recommends firming up, but the model may still choose it.
+                options = [recommended, "skip" if recommended != "skip" else "firm_up_energy"]
+                note = (" The energy is zero (no product below the join in this calculation); that alone does"
+                        " not recommend firming up." if zero else "")
+                context = (f"Rule recommends {recommended}; energy is {value} eV/atom.{note} "
+                           f"Remaining budget: {budget.remaining()}.")
+                chosen = llm_choose(options, context, budget, config,
                     system="Choose an action; never supply numerical evidence.")
                 if not chosen:
                     raise ValueError("Kinetics model returned no valid action")
                 action = chosen[0]
+                rationale = f"Rule recommended {recommended}; model chose {action}.{note}"
+                if action != recommended:
+                    # A separate, budgeted call: the model's post-hoc explanation, as in Thermo.
+                    if config.model == "offline":
+                        explanation = "Offline test model selected an alternative action."
+                    else:
+                        explanation = llm_call(f"{context}\nThe recommended action was {recommended}; you selected "
+                            f"{action}. In one sentence, explain that choice. Do not invent evidence.", budget, config,
+                            system="Explain the selected action using only the supplied context.").text.strip()
+                        if not explanation:
+                            raise ValueError("Kinetics model returned no override explanation")
+                    rationale += f" Model explanation (post-hoc): {explanation}"
                 spent = budget.spent
                 board.post_artifact(Artifact(artifact_id=board.new_id(self.name), run_id=board.run_id,
                     item_id=item.item_id, agent=self.name, type="kinetics_report",
                     values={"kinetics_energy_decision": action}, cites=[a.artifact_id],
-                    rationale=f"Rule recommended {recommended}; model chose {action}.",
+                    rationale=rationale,
                     cost=Cost(tokens_in=spent.tokens_in-before.tokens_in, tokens_out=spent.tokens_out-before.tokens_out,
                               usd=spent.usd-before.usd)))
                 if action == "firm_up_energy" and not any(n.type == "firm_up_energy" and n.from_agent == self.name for n in board.needs(item.item_id)):

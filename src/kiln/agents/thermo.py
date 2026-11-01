@@ -11,6 +11,13 @@ from kiln.compute import client
 from kiln.schemas import Artifact, Claim, ComputeStatus, ComputeTier, Cost, Item, RunConfig
 
 HULL_WINDOW_EV_PER_ATOM = 0.1
+# Materials Project returns "no product below the join" as 0 or as float noise (about 1e-15 on 110 of
+# 635 development pairs); both are zero for the escalation rule.
+ZERO_DE_EV_PER_ATOM = 1e-6
+
+
+def is_zero_energy(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and abs(value) <= ZERO_DE_EV_PER_ATOM
 
 
 class Thermo(Agent):
@@ -66,7 +73,7 @@ class Thermo(Agent):
             energy = last.values.get("dE_ev_per_atom")
             delta = last.values.get("dE_mlip_minus_mp_ev_per_atom")
             borderline = (self.energy_margin is not None and isinstance(energy, (float, int))
-                          and not isinstance(energy, bool) and 0 < abs(energy) <= self.energy_margin)
+                          and not isinstance(energy, bool) and ZERO_DE_EV_PER_ATOM < abs(energy) <= self.energy_margin)
             conflict = self.disagreement_threshold is not None and isinstance(delta, (float, int)) and abs(delta) > self.disagreement_threshold
             # The competitor is supplied by the accepted lookup, not the MLIP tier.
             hull = next((a.values.get("competitor_e_hull_ev_per_atom") for a in reversed(accepted)
@@ -74,8 +81,7 @@ class Thermo(Agent):
                          and a.values.get("competitor_e_hull_ev_per_atom") is not None), None)
             near_hull = (isinstance(hull, (int, float)) and not isinstance(hull, bool)
                          and 0 < hull <= HULL_WINDOW_EV_PER_ATOM)
-            zero_without_other_trigger = (isinstance(energy, (int, float)) and not isinstance(energy, bool)
-                                          and energy == 0 and not near_hull and not conflict)
+            zero_without_other_trigger = is_zero_energy(energy) and not near_hull and not conflict
             if last.values.get("compute_tier") == "cached_lookup" and (borderline or near_hull) and not any(
                     a.values.get("compute_tier") == "single_point" for a in previous):
                 tier = ComputeTier.single_point
@@ -99,7 +105,10 @@ class Thermo(Agent):
         recommended = "skip" if reason.startswith("The rule does not recommend") else tier.value
         options = [recommended, "skip" if recommended != "skip" else tier.value]
         if recommended == "skip" and zero_without_other_trigger:
-            options = ["skip"]
+            # OPEN-07: a zero alone never recommends escalation, but the model may still escalate for
+            # another reason, within budget; the override below logs its explanation.
+            reason += (" The cached reaction energy is zero (no product below the join in this calculation);"
+                       " that alone does not recommend escalation and does not show the powders cannot react.")
         context = (f"Thermo for {item.precursor_a} and {item.precursor_b} at {item.temperature_c} C. "
                    f"Accepted evidence: {observed}. Rule recommendation: {recommended}. {reason} "
                    f"Remaining budget: {budget.remaining()}.")

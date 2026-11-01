@@ -180,6 +180,8 @@ def test_thermo_logs_model_override_explanation_and_its_cost(tmp_path, monkeypat
 
 @pytest.mark.parametrize("energy,hull,latest,delta,expected", [
     (0.0, None, "cached_lookup", None, "skip"),
+    (-1.7763568394002505e-15, None, "cached_lookup", None, "skip"),   # MP's float-noise zero (PG_0104)
+    (-2e-6, None, "cached_lookup", None, "single_point"),
     (-0.05, None, "cached_lookup", None, "single_point"),
     (-0.05001, None, "cached_lookup", None, "skip"),
     (0.0, 0.1, "cached_lookup", None, "single_point"),
@@ -213,11 +215,39 @@ def test_thermo_escalation_recommendation_boundaries(tmp_path, monkeypatch, ener
     Thermo(config=cfg, energy_margin_ev_per_atom=0.05,
            disagreement_threshold_ev_per_atom=0.05).step(item, board, Budget(cfg))
     assert recommendations[0][0] == expected
-    if energy == 0 and expected == "skip":
-        assert recommendations == [["skip"]]
+    if abs(energy) <= 1e-6 and expected == "skip":
+        # OPEN-07: a zero never recommends escalation, but the model may still choose it.
+        assert recommendations == [["skip", "single_point" if latest == "cached_lookup" else "bounded_relaxation"]]
 
 
-def test_kinetics_does_not_offer_zero_energy_escalation(tmp_path, monkeypatch):
+def test_thermo_model_may_escalate_on_zero_and_logs_why(tmp_path, monkeypatch):
+    run = tmp_path / "zero-override"
+    run.mkdir()
+    cfg = RunConfig(run_id="zero-override", condition="C4", seed=1, model="offline")
+    board = Board(run)
+    item = Item(item_id="example", source="alab_demo", precursor_a="CaCO3", precursor_b="TiO2",
+                temperature_c=900, split="dev")
+    board.post_artifact(Artifact(artifact_id="lookup", run_id=cfg.run_id, item_id=item.item_id,
+        agent="thermo", type="reaction_report", verifier=VerifierStatus.accepted,
+        values={"compute_tier": "cached_lookup", "dE_ev_per_atom": -8.75e-15}))
+    requested = []
+
+    class Compute:
+        def request(self, item, agent, tier, reason, inputs, budget):
+            requested.append((tier, reason))
+            raise RuntimeError("stop after the request")
+
+    monkeypatch.setattr(thermo_module, "llm_choose", lambda options, *a, **k: ["single_point"])
+    with pytest.raises(RuntimeError):
+        Thermo(Compute(), config=cfg, energy_margin_ev_per_atom=0.05,
+               disagreement_threshold_ev_per_atom=0.05).step(item, board, Budget(cfg))
+    tier, reason = requested[0]
+    assert tier == ComputeTier.single_point
+    assert "Rule recommended skip; model chose single_point" in reason
+    assert "is zero" in reason and "Model explanation (post-hoc)" in reason
+
+
+def _kinetics_zero_board(tmp_path, energy):
     run = tmp_path / "zero"
     run.mkdir()
     cfg = RunConfig(run_id="zero", condition="C4", seed=1, model="offline")
@@ -228,15 +258,31 @@ def test_kinetics_does_not_offer_zero_energy_escalation(tmp_path, monkeypatch):
         agent="kinetics", type="kinetics_report", verifier=VerifierStatus.accepted, values={}))
     board.post_artifact(Artifact(artifact_id="energy", run_id=cfg.run_id, item_id=item.item_id,
         agent="thermo", type="reaction_report", verifier=VerifierStatus.accepted,
-        values={"dE_ev_per_atom": 0.0}))
+        values={"dE_ev_per_atom": energy}))
+    return cfg, board, item
+
+
+@pytest.mark.parametrize("energy", [0.0, -1.7763568394002505e-15])
+def test_kinetics_zero_energy_recommends_skip_but_offers_firm_up(tmp_path, monkeypatch, energy):
+    cfg, board, item = _kinetics_zero_board(tmp_path, energy)
     choices = []
     def choose(options, *args, **kwargs):
         choices.append(options)
         return ["skip"]
     monkeypatch.setattr(kinetics_module, "llm_choose", choose)
     Kinetics(config=cfg, energy_margin_ev_per_atom=0.05).step(item, board, Budget(cfg))
-    assert choices == [["skip"]]
+    assert choices == [["skip", "firm_up_energy"]]
     assert not board.needs(item.item_id)
+
+
+def test_kinetics_model_may_firm_up_a_zero_and_logs_why(tmp_path, monkeypatch):
+    cfg, board, item = _kinetics_zero_board(tmp_path, 0.0)
+    monkeypatch.setattr(kinetics_module, "llm_choose", lambda options, *a, **k: ["firm_up_energy"])
+    Kinetics(config=cfg, energy_margin_ev_per_atom=0.05).step(item, board, Budget(cfg))
+    assert [n.type for n in board.needs(item.item_id)] == ["firm_up_energy"]
+    decision = next(a for a in board.artifacts(item.item_id) if a.values.get("kinetics_energy_decision"))
+    assert "Rule recommended skip; model chose firm_up_energy" in decision.rationale
+    assert "Model explanation (post-hoc)" in decision.rationale
 
 
 def test_lookup_competitor_is_copied_into_verifiable_artifact(tmp_path):
