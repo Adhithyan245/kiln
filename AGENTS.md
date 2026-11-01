@@ -31,13 +31,14 @@ Kiln is an auditable, budget-aware triage system for solid-state reactions. Spec
 - **One operator launches.** Everyone else only watches `#kiln-alerts`; two launches of the same plan would compete for the same runs.
 - On the GB10, the Gemini key and the two webhooks live in `~/.bashrc` and load only in interactive shells: inside `tmux` run `source ~/.bashrc`, and run scripts with `bash -i`. Never print them.
 - Labels never go to either run machine.
-- **Two machines** (`docs/plan-changes.md` row 27): the full experiment runs on the GB10 (**primary**) and again on an H100 (separate replication, set up by Hemanath). The H100 writes to `runs-h100/`, `protocol/predictions-h100.manifest.json` and `protocol/posts-h100.jsonl`, so the two never overwrite each other when results are combined, and it uses the second Gemini account's key.
+- **Two machines** (`docs/plan-changes.md` row 27): the full experiment runs on the GB10 (**primary**) and again on an H100 (separate replication, set up by Hemanath). The H100 writes to `runs-h100/`, `protocol/predictions-h100.manifest.json` and `protocol/posts-h100.jsonl`, so the two never overwrite each other when results are combined, and it uses the second Gemini account (`GEMINI_API_KEY_2` set, `GEMINI_API_KEY` unset). Its GPU tiers run on the NVIDIA ALCHEMI Toolkit with ASE finishing what it leaves (row 28): launch it with `KILN_TIER_SETTINGS=env/h100/tier_settings.json`; the preflight refuses to start otherwise.
 
 ## Ownership
 | Folder / file | Owner |
 |---|---|
 | `src/kiln/data/`, `src/kiln/provenance/`, `src/kiln/verifier/`, `src/kiln/scoring/`, `src/kiln/baselines/`, `data/alab/`, `protocol/` | Hemanath (A — Evaluation) |
 | `src/kiln/compute/service.py`, `src/kiln/compute/client.py` (routing, caching, request log, health check), `src/kiln/tools/mp.py`, `src/kiln/board/`, `src/kiln/agents/base.py`, `src/kiln/agents/single.py`, `src/kiln/agents/planner.py`, `src/kiln/runners/`, `src/kiln/night/`, `src/kiln/compute/backends.py`, `src/kiln/compute/cache.py`, `src/kiln/compute/profile.py`, `env/gb10/`, `cache/` | CJ (B — Infrastructure & Integration) |
+| `env/h100/` (the H100 replication's tier settings, ALCHEMI Toolkit backend) | Adhi (D — Compute Science) |
 | `src/kiln/agents/thermo.py`, `src/kiln/agents/kinetics.py`, `src/kiln/agents/precursor.py`, `src/kiln/tools/tammann.py`, `src/kiln/tools/precursors.py`, `src/kiln/review/`, `data/precursor_props.csv`, `app/` | Annamayya (C — Chemistry & Product) |
 | `src/kiln/compute/tiers.py` (single point, bounded relaxation), `src/kiln/compute/convergence.py`, `src/kiln/compute/energy_reference.py`, `src/kiln/compute/decomposition.py`, `src/kiln/budget.py`, `src/kiln/compute/profiling.py`, `src/kiln/compute/accounting.py` | Adhi (D — Compute Science) |
 | `src/kiln/schemas.py`, `docs/interfaces.md`, `AGENTS.md` | Shared: change only after telling the team |

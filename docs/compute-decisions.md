@@ -49,7 +49,16 @@ Source: `results/gb10/first_calcs_float64.json`, `results/gb10/first_calcs_float
 | 40 structures, single points | Toolkit 1.76 s vs ASE 1.22 s | same |
 
 - **Decision:** ASE (`FrechetCellFilter` + FIRE2) stays the default for Night 2. A 1.3x speed-up does not justify 3 in 40 relaxations failing to converge, which would become review flags. The gap is the cell algorithm, not throughput: per step both are similar, and the Frechet log-strain cell update converges in far fewer steps.
-- To use the Toolkit anyway: `"backend": "nvalchemi"`, plus `"fire_tmax": 1.0, "fire_maxstep": 0.2, "dt": 0.2`. A hybrid (Toolkit batch first, ASE to finish what it leaves unconverged) is the natural next step, after the event.
+- To use the Toolkit anyway: `"backend": "nvalchemi"`, plus `"fire_tmax": 1.0, "fire_maxstep": 0.2, "dt": 0.2`.
+- **Hybrid built (Nov 1): `"backend": "nvalchemi+ase"`** runs the batch on the Toolkit, then re-runs with ASE, from the original structure, only what the Toolkit left unconverged or failed. **The H100 replication uses it** (`env/h100/tier_settings.json`, plan-changes row 28); the GB10 primary run stays on ASE. GB10 check (`results/gb10/toolkit_hybrid_check.json`, 40 strained and rattled TiO2, CaO, CaTiO3 and CaCO3 cells, float32):
+
+| Backend | Converged | GPU-seconds |
+|---|---|---|
+| ASE | 40/40 | 27.1 |
+| Toolkit alone | 39/40 | 26.7 (first Toolkit call; may include kernel compilation) |
+| Toolkit + ASE fallback | 40/40 | 14.4 |
+
+  Energies within 0.25 meV/atom of ASE (median 0.04). On the real pair CaO + TiO2 with the H100 settings, the Toolkit left 12 of 40 phases unconverged and ASE finished all 12: status ok, ΔE −0.1310 against MP −0.1327 eV/atom. Without the fallback that request would have been `not_converged`.
 
 ## 5. Prices and per-item budget: proposed (Sat Oct 31, for Hemanath to freeze)
 
