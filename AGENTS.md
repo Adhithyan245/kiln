@@ -30,8 +30,8 @@ Kiln is an auditable, budget-aware triage system for solid-state reactions. Spec
 - The run reads `protocol/frozen_settings.json` and runs every condition and seed at once (`--parallel 12`), then the OPEN-23 finalize step, then the manifest and the hash post (`src/kiln/night/plans/night2.toml`, `docs/plan-changes.md` rows 22–25).
 - **One operator launches.** Everyone else only watches `#kiln-alerts`; two launches of the same plan would compete for the same runs.
 - On the GB10, the Gemini key and the two webhooks live in `~/.bashrc` and load only in interactive shells: inside `tmux` run `source ~/.bashrc`, and run scripts with `bash -i`. Never print them.
-- Labels never go to the run host, whichever machine it is.
-- The run host is the GB10 (`docs/plan-changes.md` row 15). Moving Night 2 to a Nebius H100 job is proposed, not approved.
+- Labels never go to either run machine.
+- **Two machines** (`docs/plan-changes.md` row 27): the full experiment runs on the GB10 (**primary**) and again on an H100 (separate replication, set up by Hemanath). The H100 writes to `runs-h100/`, `protocol/predictions-h100.manifest.json` and `protocol/posts-h100.jsonl`, so the two never overwrite each other when results are combined, and it uses the second Gemini account's key.
 
 ## Ownership
 | Folder / file | Owner |
