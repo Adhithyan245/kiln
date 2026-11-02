@@ -28,6 +28,7 @@ import json
 import sys
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
+from functools import lru_cache
 from itertools import combinations
 from pathlib import Path
 from typing import Any
@@ -162,6 +163,17 @@ class Recipe:
         return d
 
 
+@lru_cache(maxsize=64)
+def _energies(chemsys: str, cache_dir: str) -> tuple[ComputedEntry, ...]:
+    """The cached entries without their crystal structures: the screen needs only energies, and
+    building every structure is most of the load time. The MACE check loads full entries."""
+    path = Path(cache_dir) / f"{chemsys}.json"
+    if not path.exists():
+        raise mp.MissingCache(f"no cached Materials Project entries for {chemsys} at {path}")
+    return tuple(ComputedEntry.from_dict({k: v for k, v in d.items() if k != "structure"})
+                 for d in json.loads(path.read_text(encoding="utf-8")))
+
+
 def _lowest(entries: Sequence[ComputedEntry], formula: str) -> ComputedEntry | None:
     target = Composition(formula).reduced_formula
     matching = [e for e in entries if e.composition.reduced_formula == target]
@@ -194,7 +206,7 @@ def screen(target: str, temperature_c: float, pa: str, pb: str, b: Balanced, *,
     """The cheap tier for one pair: Materials Project energies plus the precursor table."""
     c = Candidate(pa, pb, b.equation(pa, pb, target), compute_units=price)
     try:
-        entries = mp.load_entries(mp.chemsys_for(pa, pb), cache_dir=cache_dir)
+        entries = list(_energies(mp.chemsys_for(pa, pb), str(cache_dir)))
     except mp.MissingCache:
         c.status = "no_mp_data"
         c.flags.append("no cached Materials Project data for this pair")
