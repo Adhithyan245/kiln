@@ -76,6 +76,19 @@ runs only), refuses an image that isn't in replay mode, pushes it to the Nebius 
 `bash env/nebius/teardown.sh --vm kiln-app --registry kiln` removes the endpoint, the VM and the registry
 (it asks before each delete). Nebius public IPs pass port 80 but not 8080, which is why the backup VM serves on 80.
 
+## Option D: Render free web service (replay plus the recipe finder, after the hackathon)
+
+`render.yaml` describes the service, and `env/render/Dockerfile` builds it: Python 3.12, pymatgen, and the
+committed energies-only cache `data/mp-energies` (23 MB) for the recipe finder's screen. Live mode and the
+MACE check stay off.
+
+1. Sign in at https://render.com with GitHub and allow it to read `Adhithyan245/kiln`.
+2. **New > Blueprint**, pick the repository, and apply. It builds from `main` and redeploys on every push.
+3. The link is `https://kiln-<suffix>.onrender.com`; `/api/status` should report `"recipe": true`.
+
+Free instances have 512 MB of memory (the app uses about 270 MB after several recipe searches) and sleep
+after 15 minutes without traffic; the first request after that takes about 30 seconds.
+
 ## Updating with new results
 
 Results land on `dev` as `runs-h100/` (H100) and `runs/` (GB10 rerun). For Option A, `git pull` is enough:
