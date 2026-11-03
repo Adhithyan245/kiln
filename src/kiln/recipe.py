@@ -204,6 +204,29 @@ def _reaction_energy(b: Balanced, pa: str, pb: str, target: str, per_fu: dict[st
     return delta / reactant_atoms
 
 
+_STABILITY: dict[tuple[str, str], tuple[float, float, tuple[str, ...]]] = {}
+
+
+def _target_stability(target: str, entries: Sequence[ComputedEntry],
+                      cache_dir: str) -> tuple[float, float, tuple[str, ...]]:
+    """The target's e_hull, phase-separation energy and hull neighbours (the byproducts a mixture
+    slightly off the target ratio, or an incomplete reaction, tends to make).
+
+    These depend only on the target's own chemical system, which every candidate pair's cache file
+    holds identically (MP fetches include subsystems), so they are computed once per target, on
+    just its elements: the same values as on the pair's whole system, for a far smaller diagram."""
+    key = (Composition(target).reduced_formula, cache_dir)
+    if key not in _STABILITY:
+        own = {el for el in Composition(target).elements}
+        sub = [e for e in entries if set(e.composition.elements) <= own]
+        pd = PhaseDiagram(sub)
+        entry = _lowest(sub, target)
+        decomp, depth = pd.get_decomp_and_phase_separation_energy(entry)
+        _STABILITY[key] = (float(pd.get_e_above_hull(entry)), float(depth),
+                           tuple(sorted({e.composition.reduced_formula for e in decomp} - {key[0]})))
+    return _STABILITY[key]
+
+
 def screen(target: str, temperature_c: float, pa: str, pb: str, b: Balanced, *,
            cache_dir: Path = mp.CACHE_DIR, table: Path = DEFAULT_TABLE, price: float = 0.1) -> Candidate:
     """The cheap tier for one pair: Materials Project energies plus the precursor table."""
@@ -225,21 +248,15 @@ def screen(target: str, temperature_c: float, pa: str, pb: str, b: Balanced, *,
         c.status = "no_mp_data"
         c.flags.append("no Materials Project entry for " + ", ".join(missing))
         return c
-    pd = PhaseDiagram(entries)
     per_fu = {f: _energy_per_fu(e, f) for f, e in found.items()}
     c.dE_mp_ev_per_atom = _reaction_energy(b, pa, pb, target, per_fu)
     c.dG_mp_ev_per_atom = _reaction_energy(b, pa, pb, target, per_fu, temperature_c)
-    c.target_e_hull_ev_per_atom = float(pd.get_e_above_hull(found[target]))
+    e_hull, depth, competing = _target_stability(target, entries, str(cache_dir))
+    c.target_e_hull_ev_per_atom, c.target_depth_ev_per_atom, c.competing_phases = e_hull, depth, list(competing)
     if c.dG_mp_ev_per_atom >= -TOL:
         c.flags.append("no driving force to the target at this temperature")
     if c.target_e_hull_ev_per_atom > 0.05:
         c.flags.append(f"target is {c.target_e_hull_ev_per_atom:.3f} eV/atom above the hull (metastable)")
-    # How far the target sits below the hull of its neighbours, and which phases those are: the
-    # byproducts a mixture slightly off the target ratio, or an incomplete reaction, tends to make.
-    decomp, depth = pd.get_decomp_and_phase_separation_energy(found[target])
-    c.target_depth_ev_per_atom = float(depth)
-    c.competing_phases = sorted({e.composition.reduced_formula for e in decomp}
-                                - {Composition(target).reduced_formula})
     if depth <= 0 and -depth < SHALLOW_EV_PER_ATOM and c.competing_phases:
         c.notes.append(f"only {-depth * 1000:.0f} meV/atom below its neighbours "
                        f"{', '.join(c.competing_phases)}: watch for those as byproducts")
