@@ -13,6 +13,18 @@ def finite(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
+def conditions_path(root: Path) -> Path | None:
+    """The committed furnace conditions of the held-out pairs (no outcomes), if present."""
+    path = root / "data" / "heldout-conditions.jsonl"
+    return path if path.is_file() else None
+
+
+def conditions(root: Path) -> dict[str, dict]:
+    """item_id -> label-free conditions, from KILN_ITEMS or the committed held-out file."""
+    path = os.environ.get("KILN_ITEMS") or conditions_path(root)
+    return {i.get("item_id"): i for i in data.read_jsonl(Path(path))} if path else {}
+
+
 def records(root: Path) -> list[dict]:
     """Load lightweight summaries; read individual evidence only when replayed."""
     rows = []
@@ -42,7 +54,7 @@ def records(root: Path) -> list[dict]:
                     rows.append(row)
         except (OSError, ValueError, TypeError, AttributeError):
             continue
-    item_path = os.environ.get("KILN_ITEMS")
+    item_path = os.environ.get("KILN_ITEMS") or conditions_path(root)
     if item_path:
         path = Path(item_path)
         # This input must be the label-free item export, never the raw ledger.
