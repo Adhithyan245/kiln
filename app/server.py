@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,6 +19,17 @@ from app.components.evidence_strip import render_evidence_strip
 ROOT = Path(os.environ.get("KILN_ROOT", APP_DIR.parent))
 TEMPLATE = APP_DIR / "index.html"
 _CACHE_LOCK = threading.RLock()
+_RECIPE_LOCK = threading.Lock()   # one recipe search at a time: each reads large cache files
+RECIPE_FORMULA = re.compile(r"[A-Z][A-Za-z0-9().]{0,39}")
+
+
+def _recipe_cache() -> Path | None:
+    """The full Materials Project cache if present, else the energies-only one a deployment ships
+    (`python -m kiln.recipe --compact-cache cache/mp-energies`), else None."""
+    for name in ("mp", "mp-energies"):
+        if (ROOT / "cache" / name).is_dir():
+            return ROOT / "cache" / name
+    return None
 _DATA_CACHE: dict[tuple, tuple[tuple, object]] = {}
 
 
@@ -126,7 +138,11 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
-        if urlsplit(self.path).path != "/api/triage":
+        route = urlsplit(self.path).path
+        if route == "/api/recipe":
+            self.recipe()
+            return
+        if route != "/api/triage":
             self.send_json({"error": "Not found"}, 404)
             return
         try:
@@ -141,6 +157,47 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, TypeError):
             self.send_json({"error": "Invalid request or unavailable item export"}, 400)
 
+    def recipe(self) -> None:
+        """Rank precursor pairs for a target (kiln.recipe). The MACE check is off unless the host
+        enables it with KILN_RECIPE_CHECK=1, because it can take minutes on a CPU."""
+        hint = "Enter a formula such as BaTiO3 and a temperature from 100 to 2000 °C"
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if not 0 < length <= 1024:
+                raise ValueError(hint)
+            body = json.loads(self.rfile.read(length))
+            target = str(body.get("target", "")).strip()
+            temperature = float(body.get("temperature_c"))
+            if not RECIPE_FORMULA.fullmatch(target) or not 100 <= temperature <= 2000:
+                raise ValueError(hint)
+            from pymatgen.core import Composition
+            Composition(target)
+        except Exception:
+            self.send_json({"error": hint}, 400)
+            return
+        cache_dir = _recipe_cache()
+        if cache_dir is None:
+            self.send_json({"error": "The Materials Project cache is not on this server, so recipes cannot be screened."}, 503)
+            return
+        from kiln import recipe
+        # The MACE check needs crystal structures, which only the full cache has.
+        enabled = os.environ.get("KILN_RECIPE_CHECK") == "1" and cache_dir.name == "mp"
+        check = bool(body.get("check")) and enabled
+        settings = None
+        if check:
+            from kiln.compute.profile import load_tier_settings
+            from kiln.schemas import ComputeTier
+            settings = {**load_tier_settings()[ComputeTier.single_point],
+                        "device": os.environ.get("KILN_RECIPE_DEVICE", "cpu")}
+        try:
+            with _RECIPE_LOCK:
+                result = recipe.find(target, temperature, n_check=3 if check else 0,
+                                     cache_dir=cache_dir, settings=settings)
+        except Exception:
+            self.send_json({"error": "The recipe search failed on this server. Check the server log."}, 500)
+            return
+        self.send_json({**result.to_dict(), "check_available": enabled})
+
     def do_GET(self) -> None:
         route = urlsplit(self.path).path
         assets = {"/assets/app.css": (APP_DIR / "assets" / "app.css", "text/css; charset=utf-8"),
@@ -149,7 +206,10 @@ class Handler(BaseHTTPRequestHandler):
                   "/assets/lab.js": (APP_DIR / "assets" / "lab.js", "text/javascript; charset=utf-8")}
         try:
             if route == "/api/status":
-                self.send_json({"live": False})
+                cache = _recipe_cache()
+                self.send_json({"live": False, "recipe": cache is not None,
+                                "recipe_check": os.environ.get("KILN_RECIPE_CHECK") == "1"
+                                and cache is not None and cache.name == "mp"})
                 return
             elif route == "/api/pairs":
                 rows = _cached("lab-records", _lab_paths(), lambda: lab.records(ROOT))

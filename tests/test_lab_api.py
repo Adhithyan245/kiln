@@ -7,6 +7,8 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from http.server import ThreadingHTTPServer
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parents[1]))
 from app import lab, server
 
@@ -95,7 +97,7 @@ def test_http_routes_assets_and_traversal(tmp_path, monkeypatch):
         with urlopen(url) as response:
             assert b"Select your chemicals" in response.read()
         with urlopen(url + "/api/status") as response:
-            assert json.load(response) == {"live": False}
+            assert json.load(response)["live"] is False
         with urlopen(url + "/assets/lab.js") as response:
             assert response.status == 200
         for path in ("/assets/../server.py", "/assets/%2e%2e/server.py", "/labels/test.json"):
@@ -157,6 +159,55 @@ def test_http_recorded_pair_and_failure_flow(tmp_path, monkeypatch):
         assert abs(compute["totals"]["compute_units"] - 1.1) < 1e-9
         assert compute["totals"]["gpu_seconds"] == 5
         assert compute["by_condition"][0]["single_point_pct"] == 100
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join()
+
+
+def test_recipe_route_validates_and_screens(tmp_path, monkeypatch):
+    pytest.importorskip("pymatgen")
+    from kiln.tools import mp
+    from tests.tools.mp_fixtures import ca_ti_o_entries
+
+    monkeypatch.setattr(server, "ROOT", tmp_path)
+    monkeypatch.delenv("KILN_RECIPE_CHECK", raising=False)
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://127.0.0.1:{httpd.server_port}/api/recipe"
+
+    def post(body):
+        return urlopen(Request(url, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"}))
+
+    try:
+        for bad in ({"target": "not a formula", "temperature_c": 900}, {"target": "BaTiO3", "temperature_c": 5000},
+                    {"target": "BaTiO3"}):
+            try:
+                post(bad)
+                assert False, "Invalid recipe input must fail"
+            except HTTPError as error:
+                assert error.code == 400
+        try:
+            post({"target": "CaTiO3", "temperature_c": 1000})
+            assert False, "No cache: the server must say so, not guess"
+        except HTTPError as error:
+            assert error.code == 503
+        (tmp_path / "cache" / "mp").mkdir(parents=True)
+        mp._write_entries(tmp_path / "cache" / "mp" / "Ca-O-Ti.json", ca_ti_o_entries())
+        with post({"target": "CaTiO3", "temperature_c": 1000, "check": True}) as response:
+            first = result = json.load(response)
+        assert result["target"] == "CaTiO3" and result["n_checked"] == 0 and result["check_available"] is False
+        assert all(c["precursor_a"] != c["precursor_b"] for c in result["candidates"])
+        # A deployment ships only the energies-only cache: the screen works, the MACE check stays off.
+        from kiln import recipe
+        recipe.compact_cache(tmp_path / "cache" / "mp", tmp_path / "cache" / "mp-energies")
+        import shutil
+        shutil.rmtree(tmp_path / "cache" / "mp")
+        monkeypatch.setenv("KILN_RECIPE_CHECK", "1")
+        with post({"target": "CaTiO3", "temperature_c": 1000, "check": True}) as response:
+            result = json.load(response)
+        assert result["candidates"] == first["candidates"] and result["check_available"] is False
     finally:
         httpd.shutdown()
         httpd.server_close()
