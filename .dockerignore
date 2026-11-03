@@ -1,0 +1,12 @@
+# Keep images to what the app reads at run time.
+.git
+.venv
+cache/
+labels/
+stub-invalid-*/
+**/__pycache__
+.pytest_cache
+tests/
+prompts/
+notebooks/
+*.pptx

@@ -166,7 +166,7 @@ class Recipe:
         return d
 
 
-@lru_cache(maxsize=64)
+@lru_cache(maxsize=16)   # 16 systems: well inside a 512 MB host
 def _energies(chemsys: str, cache_dir: str) -> tuple[ComputedEntry, ...]:
     """The cached entries without their crystal structures: the screen needs only energies, and
     building every structure is most of the load time. The MACE check loads full entries."""

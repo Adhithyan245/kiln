@@ -1,0 +1,12 @@
+# Render blueprint for the Kiln lab app (docs/deploy.md, option D). Render dashboard: New > Blueprint,
+# pick this repository; it builds env/render/Dockerfile from main and redeploys on every push.
+services:
+  - type: web
+    name: kiln
+    runtime: docker
+    plan: free
+    branch: main
+    dockerfilePath: ./env/render/Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/status
+    autoDeploy: true
