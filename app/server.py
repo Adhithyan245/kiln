@@ -81,7 +81,7 @@ def _lab_paths() -> tuple[Path, ...]:
         for run in sorted(base.glob("*")):
             if run.is_dir():
                 paths.extend(run / name for name in ("predictions.jsonl", "config.json", "compute_requests.jsonl"))
-    item_path = os.environ.get("KILN_ITEMS")
+    item_path = os.environ.get("KILN_ITEMS") or lab.conditions_path(ROOT)
     if item_path:
         paths.append(Path(item_path))
     return tuple(paths)
@@ -142,6 +142,9 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/api/recipe":
             self.recipe()
             return
+        if route == "/api/whatif":
+            self.whatif()
+            return
         if route != "/api/triage":
             self.send_json({"error": "Not found"}, 404)
             return
@@ -156,6 +159,32 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(result, status)
         except (ValueError, TypeError):
             self.send_json({"error": "Invalid request or unavailable item export"}, 400)
+
+    def whatif(self) -> None:
+        """One recorded prediction rescored by the frozen rules at another furnace temperature."""
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if not 0 < length <= 1024:
+                raise ValueError
+            body = json.loads(self.rfile.read(length))
+            run_id, item_id = str(body["run_id"]), str(body["item_id"])
+            temperature = float(body["temperature_c"])
+        except Exception:
+            self.send_json({"error": "Choose a recorded run and enter a furnace temperature."}, 400)
+            return
+        from app import whatif
+        rows = _cached("lab-records", _lab_paths(), lambda: lab.records(ROOT))
+        row = next((r for r in rows if r.get("run_id") == run_id and r.get("item_id") == item_id), None)
+        if row is None:
+            self.send_json({"error": "That recorded run was not found."}, 404)
+            return
+        conditions = _cached("conditions", _lab_paths(), lambda: lab.conditions(ROOT)).get(item_id)
+        try:
+            status, result = whatif.whatif(row, conditions, temperature)
+        except Exception:
+            self.send_json({"error": "The what-if could not be computed on this server."}, 500)
+            return
+        self.send_json(result, status)
 
     def recipe(self) -> None:
         """Rank precursor pairs for a target (kiln.recipe). The MACE check is off unless the host
