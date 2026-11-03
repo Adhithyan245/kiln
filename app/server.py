@@ -21,6 +21,15 @@ TEMPLATE = APP_DIR / "index.html"
 _CACHE_LOCK = threading.RLock()
 _RECIPE_LOCK = threading.Lock()   # one recipe search at a time: each reads large cache files
 RECIPE_FORMULA = re.compile(r"[A-Z][A-Za-z0-9().]{0,39}")
+
+
+def _recipe_cache() -> Path | None:
+    """The full Materials Project cache if present, else the energies-only one a deployment ships
+    (`python -m kiln.recipe --compact-cache cache/mp-energies`), else None."""
+    for name in ("mp", "mp-energies"):
+        if (ROOT / "cache" / name).is_dir():
+            return ROOT / "cache" / name
+    return None
 _DATA_CACHE: dict[tuple, tuple[tuple, object]] = {}
 
 
@@ -166,12 +175,13 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             self.send_json({"error": hint}, 400)
             return
-        cache_dir = ROOT / "cache" / "mp"
-        if not cache_dir.is_dir():
+        cache_dir = _recipe_cache()
+        if cache_dir is None:
             self.send_json({"error": "The Materials Project cache is not on this server, so recipes cannot be screened."}, 503)
             return
         from kiln import recipe
-        enabled = os.environ.get("KILN_RECIPE_CHECK") == "1"
+        # The MACE check needs crystal structures, which only the full cache has.
+        enabled = os.environ.get("KILN_RECIPE_CHECK") == "1" and cache_dir.name == "mp"
         check = bool(body.get("check")) and enabled
         settings = None
         if check:
@@ -196,8 +206,10 @@ class Handler(BaseHTTPRequestHandler):
                   "/assets/lab.js": (APP_DIR / "assets" / "lab.js", "text/javascript; charset=utf-8")}
         try:
             if route == "/api/status":
-                self.send_json({"live": False, "recipe": (ROOT / "cache" / "mp").is_dir(),
-                                "recipe_check": os.environ.get("KILN_RECIPE_CHECK") == "1"})
+                cache = _recipe_cache()
+                self.send_json({"live": False, "recipe": cache is not None,
+                                "recipe_check": os.environ.get("KILN_RECIPE_CHECK") == "1"
+                                and cache is not None and cache.name == "mp"})
                 return
             elif route == "/api/pairs":
                 rows = _cached("lab-records", _lab_paths(), lambda: lab.records(ROOT))

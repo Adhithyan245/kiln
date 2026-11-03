@@ -87,3 +87,21 @@ def test_check_recomputes_with_mlip_energies(cache_dir):
     assert c.dG_mlip_ev_per_atom == pytest.approx(-0.05, abs=1e-6)
     assert c.dG == c.dG_mlip_ev_per_atom
     assert c.compute_units == pytest.approx(1.0)
+
+
+def test_byproducts_are_the_targets_hull_neighbours(cache_dir):
+    c = find("CaTiO3", 1000, n_check=0, cache_dir=cache_dir, precursors=["CaO", "TiO2"]).candidates[0]
+    # mp_fixtures: CaTiO3 is 0.2 eV per 5 atoms below CaO + TiO2
+    assert c.target_depth_ev_per_atom == pytest.approx(-0.04)
+    assert c.competing_phases == ["CaO", "TiO2"]
+    assert not any("byproducts" in n for n in c.notes)   # 40 meV/atom is not shallow
+
+
+def test_compact_cache_gives_the_same_screen(cache_dir, tmp_path):
+    out = tmp_path / "energies"
+    assert recipe.compact_cache(cache_dir, out) == 1
+    assert "structure" not in (out / "Ca-O-Ti.json").read_text(encoding="utf-8")
+    full = find("CaTiO3", 1000, n_check=0, cache_dir=cache_dir, precursors=["CaO", "TiO2"]).candidates[0]
+    small = find("CaTiO3", 1000, n_check=0, cache_dir=out, precursors=["CaO", "TiO2"]).candidates[0]
+    assert small.dG == pytest.approx(full.dG)
+    assert small.competing_phases == full.competing_phases

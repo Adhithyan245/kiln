@@ -80,6 +80,26 @@ python -m kiln.night run src/kiln/night/plans/night2.toml     # a night run; see
 
 Deployment (Nebius serverless endpoint, VM, Docker): `docs/deploy.md`. GPU host readiness check (setup, known-answer test, canary that refuses stub compute): `env/gb10/ready.sh`.
 
+### Recipe finder (after the hackathon, unvalidated)
+
+The study asks "will these two precursors react?". The recipe finder turns it around: **name a target compound and a furnace temperature, and get the precursor pairs ranked**, with the compute each ranking cost. It is the "screen everything cheaply, spend GPU only where it changes the answer" result put to work. It is **not part of the pre-registered study**, and its rankings have not been checked against outcomes.
+
+```bash
+uv run python -m kiln.recipe BaTiO3 --temp 900                       # rank pairs from the 46 precursors
+uv run python -m kiln.recipe LiMn2O4 --temp 800 --check 3 --device cpu   # MACE-check close calls
+uv run python -m kiln.recipe --compact-cache cache/mp-energies        # 23 MB energies-only cache for a server
+```
+
+1. **Candidates:** every pair of the 46 precursors that balances to the target, with C, H and N leaving as CO₂, H₂O and N₂ and O₂ exchanged with the air.
+2. **Screen (0.1 units each, the frozen `cached_lookup` price):**
+   - the reaction energy from Materials Project, plus the gas entropy (−T·S°, NIST-JANAF) at the furnace temperature;
+   - whether the target is stable, and its likely byproducts: the phases it sits between on the hull;
+   - the Tammann check;
+   - decomposition and volatility from `data/precursor_props.csv`.
+3. **Check (1 unit each, MACE):** only leading candidates within 0.05 eV/atom of each other, where a better energy could change the order. A clear leader costs no GPU at all.
+
+The app's **Recipe finder** page does the same, and links a recipe to Kiln's recorded study run when that pair was in the held-out set. The server uses `cache/mp` (full, MACE check allowed with `KILN_RECIPE_CHECK=1`) or `cache/mp-energies` (screen only). Limits: pairs only, the 46 precursors only, and solid entropy is left out.
+
 **Built with:** NVIDIA ALCHEMI Toolkit (every GPU calculation in the H100 result, inside the agent loop), NVIDIA DGX Spark (GB10: profiling, dry runs, replication), MACE-MPA-0, Gemini 3.8 Flash (agent decisions), Nebius (serverless endpoint, VM, container registry), the Materials Project, pymatgen and ASE.
 
 ## Data and license

@@ -196,9 +196,18 @@ def test_recipe_route_validates_and_screens(tmp_path, monkeypatch):
         (tmp_path / "cache" / "mp").mkdir(parents=True)
         mp._write_entries(tmp_path / "cache" / "mp" / "Ca-O-Ti.json", ca_ti_o_entries())
         with post({"target": "CaTiO3", "temperature_c": 1000, "check": True}) as response:
-            result = json.load(response)
+            first = result = json.load(response)
         assert result["target"] == "CaTiO3" and result["n_checked"] == 0 and result["check_available"] is False
         assert all(c["precursor_a"] != c["precursor_b"] for c in result["candidates"])
+        # A deployment ships only the energies-only cache: the screen works, the MACE check stays off.
+        from kiln import recipe
+        recipe.compact_cache(tmp_path / "cache" / "mp", tmp_path / "cache" / "mp-energies")
+        import shutil
+        shutil.rmtree(tmp_path / "cache" / "mp")
+        monkeypatch.setenv("KILN_RECIPE_CHECK", "1")
+        with post({"target": "CaTiO3", "temperature_c": 1000, "check": True}) as response:
+            result = json.load(response)
+        assert result["candidates"] == first["candidates"] and result["check_available"] is False
     finally:
         httpd.shutdown()
         httpd.server_close()

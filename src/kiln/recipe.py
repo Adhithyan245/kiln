@@ -48,6 +48,7 @@ FROZEN_SETTINGS = Path(__file__).resolve().parents[2] / "protocol" / "frozen_set
 # The gas each extra element leaves as. O2 is special: it may be released or taken from the air.
 LEAVES_AS = {"C": "CO2", "H": "H2O", "N": "N2"}
 TOL = 1e-6
+SHALLOW_EV_PER_ATOM = 0.03   # a stable target this close to its neighbours' hull gets a byproduct note
 # Standard molar entropy at 1 atm, J/(mol K), NIST-JANAF, at 298.15, 500, 1000 and 1500 K.
 GAS_ENTROPY_K = (298.15, 500.0, 1000.0, 1500.0)
 GAS_ENTROPY = {"CO2": (213.8, 234.9, 269.3, 292.2), "O2": (205.1, 220.7, 243.6, 258.1),
@@ -136,6 +137,8 @@ class Candidate:
     dG_mp_ev_per_atom: float | None = None   # the same plus the gas entropy at the furnace temperature
     dG_mlip_ev_per_atom: float | None = None # dG with MACE energies, when checked
     target_e_hull_ev_per_atom: float | None = None
+    target_depth_ev_per_atom: float | None = None  # phase-separation energy: < 0 means below its neighbours
+    competing_phases: list[str] = field(default_factory=list)
     deepest_reaction_products: str | None = None
     flags: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
@@ -231,6 +234,15 @@ def screen(target: str, temperature_c: float, pa: str, pb: str, b: Balanced, *,
         c.flags.append("no driving force to the target at this temperature")
     if c.target_e_hull_ev_per_atom > 0.05:
         c.flags.append(f"target is {c.target_e_hull_ev_per_atom:.3f} eV/atom above the hull (metastable)")
+    # How far the target sits below the hull of its neighbours, and which phases those are: the
+    # byproducts a mixture slightly off the target ratio, or an incomplete reaction, tends to make.
+    decomp, depth = pd.get_decomp_and_phase_separation_energy(found[target])
+    c.target_depth_ev_per_atom = float(depth)
+    c.competing_phases = sorted({e.composition.reduced_formula for e in decomp}
+                                - {Composition(target).reduced_formula})
+    if depth <= 0 and -depth < SHALLOW_EV_PER_ATOM and c.competing_phases:
+        c.notes.append(f"only {-depth * 1000:.0f} meV/atom below its neighbours "
+                       f"{', '.join(c.competing_phases)}: watch for those as byproducts")
     if not any(abs(n) > TOL for n in b.gases.values()):   # closed system: the a-b line is the whole story
         try:
             deepest = mp.reaction_energy(pa, pb, entries)
@@ -247,9 +259,9 @@ def screen(target: str, temperature_c: float, pa: str, pb: str, b: Balanced, *,
             tammann[f] = tammann_c(p.melting_point_c)
         if p.decomposes_at_c is not None and p.decomposes_at_c <= temperature_c:
             into = f" into {p.decomposition_product}" if p.decomposition_product else ""
-            c.notes.append(f"{f} decomposes{into} by {p.decomposes_at_c:g} C, before reacting")
+            c.notes.append(f"{f} decomposes{into} by {p.decomposes_at_c:g} °C, before reacting")
         if p.volatile_above_c is not None and p.volatile_above_c <= temperature_c:
-            c.flags.append(f"{f} is volatile above {p.volatile_above_c:g} C: material may be lost")
+            c.flags.append(f"{f} is volatile above {p.volatile_above_c:g} °C: material may be lost")
     if len(tammann) < 2:
         c.notes.append("melting point missing for " + ", ".join(f for f in (pa, pb) if f not in tammann))
     if tammann and all(temperature_c < t for t in tammann.values()):
@@ -321,12 +333,12 @@ def find(target: str, temperature_c: float, *, n_check: int = 3, cache_dir: Path
                   calculator_factory=calculator_factory, price=prices["single_point"])
         ranked = _rank(ranked)
     changed = [(c.precursor_a, c.precursor_b) for c in ranked] != before
-    return Recipe(Composition(target).reduced_formula, temperature_c, ranked, len(pairs), len(to_check),
+    return Recipe(target.strip(), temperature_c, ranked, len(pairs), len(to_check),
                   round(sum(c.compute_units for c in ranked), 3), changed)
 
 
 def _print(r: Recipe, top: int) -> None:
-    print(f"Target {r.target} at {r.temperature_c:g} C: {r.n_pairs_considered} precursor pairs balance; "
+    print(f"Target {r.target} at {r.temperature_c:g} °C: {r.n_pairs_considered} precursor pairs balance; "
           f"{r.n_checked} MACE-checked; {r.compute_units:g} compute units.")
     if not r.candidates:
         print("No pair from the precursor table balances to this target.")
@@ -345,16 +357,47 @@ def _print(r: Recipe, top: int) -> None:
           "pre-registered study.")
 
 
+ENERGY_CACHE_DIR = Path("cache") / "mp-energies"
+
+
+def compact_cache(src: Path = mp.CACHE_DIR, dst: Path = ENERGY_CACHE_DIR) -> int:
+    """Write an energies-only copy of the cache: composition, uncorrected energy, MP2020
+    correction and id per entry, no structures. About 23 MB instead of 1.5 GB for the 702 pair
+    systems, and the screen gives the same results from it; the MACE check still needs `src`."""
+    dst = Path(dst)
+    dst.mkdir(parents=True, exist_ok=True)
+    n = 0
+    for path in sorted(Path(src).glob("*.json")):
+        rows = []
+        for d in json.loads(path.read_text(encoding="utf-8")):
+            e = ComputedEntry.from_dict({k: v for k, v in d.items() if k != "structure"})
+            rows.append({"composition": e.composition.as_dict(), "energy": e.uncorrected_energy,
+                         "correction": e.correction, "entry_id": e.entry_id})
+        (dst / path.name).write_text(json.dumps(rows, separators=(",", ":")), encoding="utf-8")
+        n += 1
+    return n
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m kiln.recipe", description=__doc__.split("\n")[0])
-    ap.add_argument("target", help="target compound, e.g. BaTiO3")
-    ap.add_argument("--temp", type=float, required=True, help="furnace temperature, C")
+    ap.add_argument("target", nargs="?", help="target compound, e.g. BaTiO3")
+    ap.add_argument("--temp", type=float, help="furnace temperature, °C")
+    ap.add_argument("--compact-cache", type=Path, metavar="DIR",
+                    help=f"write the energies-only cache to DIR (e.g. {ENERGY_CACHE_DIR}) and exit")
     ap.add_argument("--check", type=int, default=3, help="leading candidates eligible for a MACE check (0: none)")
     ap.add_argument("--top", type=int, default=10, help="candidates to print")
     ap.add_argument("--cache-dir", type=Path, default=mp.CACHE_DIR)
     ap.add_argument("--device", help="device for the MACE check (default: the tier settings', e.g. cuda)")
     ap.add_argument("--json", action="store_true", help="print the full result as JSON")
     args = ap.parse_args(argv)
+    if hasattr(sys.stdout, "reconfigure"):   # degree signs and arrows on a Windows console
+        sys.stdout.reconfigure(encoding="utf-8")
+    if args.compact_cache:
+        n = compact_cache(args.cache_dir, args.compact_cache)
+        print(f"wrote {n} energies-only chemical systems to {args.compact_cache}")
+        return 0
+    if not args.target or args.temp is None:
+        ap.error("give a target and --temp, or --compact-cache DIR")
     try:
         Composition(args.target)
     except Exception:
