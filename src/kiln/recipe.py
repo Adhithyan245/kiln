@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import gzip
 import json
 import sys
 from collections.abc import Sequence
@@ -143,6 +144,7 @@ class Candidate:
     flags: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     compute_units: float = 0.0
+    score: float | None = None               # the learned ranker's score, when one is used
 
     @property
     def dG(self) -> float | None:
@@ -171,10 +173,19 @@ def _energies(chemsys: str, cache_dir: str) -> tuple[ComputedEntry, ...]:
     """The cached entries without their crystal structures: the screen needs only energies, and
     building every structure is most of the load time. The MACE check loads full entries."""
     path = Path(cache_dir) / f"{chemsys}.json"
-    if not path.exists():
+    if path.exists():
+        rows = json.loads(path.read_text(encoding="utf-8"))
+    elif (gz := path.with_suffix(".json.gz")).exists():   # the committed cache is gzipped
+        rows = json.loads(gzip.decompress(gz.read_bytes()).decode("utf-8"))
+    else:
         raise mp.MissingCache(f"no cached Materials Project entries for {chemsys} at {path}")
-    return tuple(ComputedEntry.from_dict({k: v for k, v in d.items() if k != "structure"})
-                 for d in json.loads(path.read_text(encoding="utf-8")))
+    return tuple(ComputedEntry.from_dict({k: v for k, v in d.items() if k != "structure"}) for d in rows)
+
+
+def cached_systems(cache_dir: Path | str) -> list[str]:
+    """Chemical systems in a cache directory, plain or gzipped JSON."""
+    return sorted({p.name.split(".")[0] for p in Path(cache_dir).iterdir()
+                   if p.name.endswith((".json", ".json.gz"))})
 
 
 def _lowest(entries: Sequence[ComputedEntry], formula: str) -> ComputedEntry | None:
@@ -329,8 +340,11 @@ def _formulas(table: Path) -> list[str]:
 
 def find(target: str, temperature_c: float, *, n_check: int = 3, cache_dir: Path = mp.CACHE_DIR,
          table: Path = DEFAULT_TABLE, precursors: Sequence[str] | None = None,
-         settings: dict[str, Any] | None = None, calculator_factory=None) -> Recipe:
-    """Screen every candidate pair cheaply, then MACE-check only the close calls at the top."""
+         settings: dict[str, Any] | None = None, calculator_factory=None, ranker=None) -> Recipe:
+    """Screen every candidate pair cheaply, then MACE-check only the close calls at the top.
+
+    With a `ranker` (kiln.recipe_rank.Ranker), the screened candidates are ordered by its learned
+    score instead of by driving force; the screen's numbers, flags and notes are unchanged."""
     prices, margin = _prices()
     pool = list(precursors) if precursors is not None else _formulas(table)
     pairs = candidate_pairs(target, pool)
@@ -350,6 +364,12 @@ def find(target: str, temperature_c: float, *, n_check: int = 3, cache_dir: Path
                   calculator_factory=calculator_factory, price=prices["single_point"])
         ranked = _rank(ranked)
     changed = [(c.precursor_a, c.precursor_b) for c in ranked] != before
+    if ranker is not None:
+        usable = [c for c in ranked if c.status == "ok" and c.dG is not None]
+        for c in usable:
+            c.score = ranker.score(c, balanced[(c.precursor_a, c.precursor_b)], str(cache_dir),
+                                   temperature_c, str(table))
+        ranked = sorted(usable, key=lambda c: -c.score) + [c for c in ranked if c not in usable]
     return Recipe(target.strip(), temperature_c, ranked, len(pairs), len(to_check),
                   round(sum(c.compute_units for c in ranked), 3), changed)
 
@@ -375,6 +395,7 @@ def _print(r: Recipe, top: int) -> None:
 
 
 ENERGY_CACHE_DIR = Path("cache") / "mp-energies"
+EXTENDED_TABLE = Path(__file__).resolve().parents[2] / "data" / "precursor_props_extended.csv"
 
 
 def compact_cache(src: Path = mp.CACHE_DIR, dst: Path = ENERGY_CACHE_DIR) -> int:
@@ -406,6 +427,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--cache-dir", type=Path, default=mp.CACHE_DIR)
     ap.add_argument("--device", help="device for the MACE check (default: the tier settings', e.g. cuda)")
     ap.add_argument("--json", action="store_true", help="print the full result as JSON")
+    ap.add_argument("--learned", action="store_true",
+                    help="use the 159-precursor table and the learned ranker (data/recipe-ranker.json); "
+                         "pair with --cache-dir data/mp-energies")
     args = ap.parse_args(argv)
     if hasattr(sys.stdout, "reconfigure"):   # degree signs and arrows on a Windows console
         sys.stdout.reconfigure(encoding="utf-8")
@@ -425,7 +449,14 @@ def main(argv: list[str] | None = None) -> int:
         from kiln.compute.profile import load_tier_settings
         from kiln.schemas import ComputeTier
         settings = {**load_tier_settings()[ComputeTier.single_point], "device": args.device}
-    r = find(args.target, args.temp, n_check=args.check, cache_dir=args.cache_dir, settings=settings)
+    extra: dict[str, Any] = {}
+    if args.learned:
+        from kiln import recipe_rank
+        extra = {"table": EXTENDED_TABLE, "ranker": recipe_rank.Ranker.load()}
+        if extra["ranker"] is None:
+            print(f"no fitted ranker at {recipe_rank.RANKER_PATH}", file=sys.stderr)
+            return 2
+    r = find(args.target, args.temp, n_check=args.check, cache_dir=args.cache_dir, settings=settings, **extra)
     if args.json:
         print(json.dumps(r.to_dict(), indent=2))
     else:
