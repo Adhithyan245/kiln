@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
+import time
 import re
 import sys
 import threading
@@ -20,7 +22,11 @@ ROOT = Path(os.environ.get("KILN_ROOT", APP_DIR.parent))
 TEMPLATE = APP_DIR / "index.html"
 _CACHE_LOCK = threading.RLock()
 _RECIPE_LOCK = threading.Lock()   # one recipe search at a time: each reads large cache files
-RECIPE_FORMULA = re.compile(r"[A-Z][A-Za-z0-9().]{0,39}")
+RECIPE_FORMULA = re.compile(r"[A-Za-z][A-Za-z0-9().]{0,39}")
+# Systems fetched on demand from the Materials Project (needs MP_API_KEY on the host), kept for the
+# life of the server in a writable temporary directory.
+LIVE_MP_DIR = Path(os.environ.get("KILN_LIVE_MP_DIR", Path(tempfile.gettempdir()) / "kiln-mp-live"))
+LIVE_FETCH_LIMIT, LIVE_FETCH_SECONDS = 40, 60.0
 
 
 def _recipe_cache() -> Path | None:
@@ -35,6 +41,29 @@ def _recipe_cache() -> Path | None:
 
 
 _RECIPE_MODEL: dict | None = None
+
+
+def _fetch_missing(target: str, table: Path, cache_dir: Path) -> dict:
+    """Fetch the Materials Project systems this target's pairs need and no cache has, within a
+    count and time budget. Without MP_API_KEY nothing is fetched and those pairs show as
+    'No Materials Project data'."""
+    from kiln import recipe
+    if LIVE_MP_DIR not in recipe.FALLBACK_DIRS:
+        recipe.FALLBACK_DIRS.append(LIVE_MP_DIR)
+    missing = recipe.missing_systems(target, recipe._formulas(table), cache_dir)
+    key = os.environ.get("MP_API_KEY")
+    fetched, failed, start = 0, 0, time.monotonic()
+    if key:
+        for chemsys in missing[:LIVE_FETCH_LIMIT]:
+            if time.monotonic() - start > LIVE_FETCH_SECONDS:
+                break
+            try:
+                recipe.fetch_energies(chemsys, LIVE_MP_DIR, key, timeout=20)
+                fetched += 1
+            except Exception as exc:   # network or API error: the pair stays unscreened
+                failed += 1
+                print(f"Materials Project fetch failed for {chemsys}: {type(exc).__name__}", flush=True)
+    return {"fetched": fetched, "failed": failed, "missing": len(missing) - fetched}
 
 
 def _recipe_model() -> dict:
@@ -214,12 +243,15 @@ class Handler(BaseHTTPRequestHandler):
             if not 0 < length <= 1024:
                 raise ValueError(hint)
             body = json.loads(self.rfile.read(length))
-            target = str(body.get("target", "")).strip()
+            typed = str(body.get("target", "")).strip()
             temperature = float(body.get("temperature_c"))
-            if not RECIPE_FORMULA.fullmatch(target) or not 100 <= temperature <= 2000:
+            if not RECIPE_FORMULA.fullmatch(typed) or not 100 <= temperature <= 2000:
                 raise ValueError(hint)
             from pymatgen.core import Composition
-            Composition(target)
+            from kiln import recipe as _recipe
+            target = _recipe.normalize_formula(typed)
+            if not Composition(target).valid:
+                raise ValueError(hint)
         except Exception:
             self.send_json({"error": hint}, 400)
             return
@@ -228,6 +260,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "The Materials Project cache is not on this server, so recipes cannot be screened."}, 503)
             return
         from kiln import recipe
+        from pymatgen.core import Composition
         # The MACE check needs crystal structures, which only the full cache has.
         enabled = os.environ.get("KILN_RECIPE_CHECK") == "1" and cache_dir == ROOT / "cache" / "mp"
         check = bool(body.get("check")) and enabled
@@ -239,8 +272,11 @@ class Handler(BaseHTTPRequestHandler):
                         "device": os.environ.get("KILN_RECIPE_DEVICE", "cpu")}
         # The full cache covers only the study's 46 precursors, so it keeps their table and order.
         model = {} if cache_dir == ROOT / "cache" / "mp" else _recipe_model()
+        fetch = {"fetched": 0, "missing": 0, "available": bool(os.environ.get("MP_API_KEY"))}
         try:
             with _RECIPE_LOCK:
+                if cache_dir != ROOT / "cache" / "mp":
+                    fetch.update(_fetch_missing(target, model.get("table", recipe.DEFAULT_TABLE), cache_dir))
                 result = recipe.find(target, temperature, n_check=3 if check else 0,
                                      cache_dir=cache_dir, settings=settings, **model)
         except Exception:
@@ -250,7 +286,17 @@ class Handler(BaseHTTPRequestHandler):
         ranking = {"method": "learned" if ranker else "driving_force",
                    "n_precursors": len(recipe._formulas(model.get("table", recipe.DEFAULT_TABLE))),
                    "summary": ranker.meta.get("summary", "") if ranker else ""}
-        self.send_json({**result.to_dict(), "check_available": enabled, "ranking": ranking})
+        why = ""
+        if not result.candidates:
+            pool = {Composition(f).reduced_formula for f in recipe._formulas(model.get("table", recipe.DEFAULT_TABLE))}
+            cations = [e.symbol for e in Composition(target).elements if e.symbol not in ("O", "C", "H", "N")]
+            if Composition(target).reduced_formula in pool:
+                why = f"{target} is itself one of Kiln's precursors, so it is bought rather than made from a pair."
+            elif len(cations) < 2:
+                why = (f"{target} has only one element besides O, C, H and N, so it comes from a single precursor "
+                       "(for example by decomposing a salt), and the finder only tries pairs.")
+        self.send_json({**result.to_dict(), "check_available": enabled, "ranking": ranking,
+                        "typed": typed, "materials_project": fetch, "why_none": why})
 
     def do_GET(self) -> None:
         route = urlsplit(self.path).path
