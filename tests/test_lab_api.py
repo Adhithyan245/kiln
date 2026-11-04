@@ -172,6 +172,9 @@ def test_recipe_route_validates_and_screens(tmp_path, monkeypatch):
 
     monkeypatch.setattr(server, "ROOT", tmp_path)
     monkeypatch.delenv("KILN_RECIPE_CHECK", raising=False)
+    monkeypatch.delenv("MP_API_KEY", raising=False)   # no network in tests
+    monkeypatch.setattr(server, "LIVE_MP_DIR", tmp_path / "mp-live")
+    monkeypatch.setattr(server, "_RECIPE_MODEL", None)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
@@ -208,6 +211,23 @@ def test_recipe_route_validates_and_screens(tmp_path, monkeypatch):
         with post({"target": "CaTiO3", "temperature_c": 1000, "check": True}) as response:
             result = json.load(response)
         assert result["candidates"] == first["candidates"] and result["check_available"] is False
+        # Any case is accepted and reported back; missing systems are fetched only with a key.
+        with post({"target": "catio3", "temperature_c": 1000}) as response:
+            result = json.load(response)
+        assert result["target"] == "CaTiO3" and result["typed"] == "catio3"
+        assert result["candidates"] == first["candidates"]
+        assert result["materials_project"]["available"] is False and result["materials_project"]["fetched"] == 0
+        calls = []
+        monkeypatch.setenv("MP_API_KEY", "test-key")
+        monkeypatch.setattr(recipe, "missing_systems", lambda target, pool, cache_dir: ["Ca-O-Zz"])
+        monkeypatch.setattr(recipe, "fetch_energies", lambda chemsys, dst, key, timeout: calls.append((chemsys, dst)))
+        with post({"target": "CaTiO3", "temperature_c": 1000}) as response:
+            result = json.load(response)
+        assert calls == [("Ca-O-Zz", tmp_path / "mp-live")] and result["materials_project"]["fetched"] == 1
+        with post({"target": "FeO", "temperature_c": 900}) as response:
+            assert "single precursor" in json.load(response)["why_none"]
+        with post({"target": "Fe2O3", "temperature_c": 900}) as response:
+            assert "itself one of Kiln's precursors" in json.load(response)["why_none"]
     finally:
         httpd.shutdown()
         httpd.server_close()

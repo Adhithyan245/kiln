@@ -26,6 +26,7 @@ import argparse
 import csv
 import gzip
 import json
+import re
 import sys
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
@@ -172,20 +173,122 @@ class Recipe:
 def _energies(chemsys: str, cache_dir: str) -> tuple[ComputedEntry, ...]:
     """The cached entries without their crystal structures: the screen needs only energies, and
     building every structure is most of the load time. The MACE check loads full entries."""
-    path = Path(cache_dir) / f"{chemsys}.json"
-    if path.exists():
-        rows = json.loads(path.read_text(encoding="utf-8"))
-    elif (gz := path.with_suffix(".json.gz")).exists():   # the committed cache is gzipped
-        rows = json.loads(gzip.decompress(gz.read_bytes()).decode("utf-8"))
+    for base in (Path(cache_dir), *FALLBACK_DIRS):
+        path = base / f"{chemsys}.json"
+        if path.exists():
+            rows = json.loads(path.read_text(encoding="utf-8"))
+            break
+        if (gz := path.with_suffix(".json.gz")).exists():   # the committed cache is gzipped
+            rows = json.loads(gzip.decompress(gz.read_bytes()).decode("utf-8"))
+            break
     else:
-        raise mp.MissingCache(f"no cached Materials Project entries for {chemsys} at {path}")
+        raise mp.MissingCache(f"no cached Materials Project entries for {chemsys} in {cache_dir}")
     return tuple(ComputedEntry.from_dict({k: v for k, v in d.items() if k != "structure"}) for d in rows)
 
 
+# Extra directories searched after `cache_dir`, e.g. a writable directory for systems fetched on demand.
+FALLBACK_DIRS: list[Path] = []
+
+
 def cached_systems(cache_dir: Path | str) -> list[str]:
-    """Chemical systems in a cache directory, plain or gzipped JSON."""
-    return sorted({p.name.split(".")[0] for p in Path(cache_dir).iterdir()
-                   if p.name.endswith((".json", ".json.gz"))})
+    """Chemical systems in a cache directory (and FALLBACK_DIRS), plain or gzipped JSON."""
+    return sorted({p.name.split(".")[0] for base in (Path(cache_dir), *FALLBACK_DIRS) if base.is_dir()
+                   for p in base.iterdir() if p.name.endswith((".json", ".json.gz"))})
+
+
+def has_system(chemsys: str, cache_dir: Path | str) -> bool:
+    return any((base / f"{chemsys}{ext}").exists() for base in (Path(cache_dir), *FALLBACK_DIRS)
+               for ext in (".json", ".json.gz"))
+
+
+def missing_systems(target: str, precursors: Sequence[str], cache_dir: Path | str) -> list[str]:
+    """Chemical systems the screen would need for `target` that no cache directory has."""
+    return sorted({mp.chemsys_for(pa, pb) for pa, pb, _ in candidate_pairs(target, precursors)}
+                  - {s for s in cached_systems(cache_dir)})
+
+
+MP_THERMO_URL = "https://api.materialsproject.org/materials/thermo/"
+
+
+def fetch_energies(chemsys: str, dst: Path, api_key: str, timeout: float = 30.0) -> Path:
+    """Fetch one chemical system (all subsystems, GGA/GGA+U) from the Materials Project REST API into
+    `dst` in the compact energies-only form. Same entries as mp_api's get_entries_in_chemsys, without
+    the client (which hangs in server threads)."""
+    import urllib.parse
+    import urllib.request
+    from itertools import combinations as combos
+    els = sorted(chemsys.split("-"))
+    subs = ["-".join(c) for n in range(1, len(els) + 1) for c in combos(els, n)]
+    rows, skip = [], 0
+    while True:
+        query = urllib.parse.urlencode({"chemsys": ",".join(subs), "thermo_types": "GGA_GGA+U",
+                                        "_fields": "entries", "_limit": 1000, "_skip": skip})
+        req = urllib.request.Request(f"{MP_THERMO_URL}?{query}",
+                                     headers={"X-API-KEY": api_key, "User-Agent": "kiln-recipe-finder"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            payload = json.load(resp)
+        docs = payload.get("data", [])
+        for doc in docs:
+            for d in (doc.get("entries") or {}).values():
+                e = ComputedEntry.from_dict({k: v for k, v in d.items() if k != "structure"})
+                rows.append({"composition": e.composition.as_dict(), "energy": e.uncorrected_energy,
+                             "correction": e.correction, "entry_id": str(e.entry_id)})
+        skip += len(docs)
+        if not docs or skip >= int(payload.get("meta", {}).get("total_doc", 0)):
+            break
+    dst = Path(dst)
+    dst.mkdir(parents=True, exist_ok=True)
+    path = dst / f"{chemsys}.json"
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(rows, separators=(",", ":")), encoding="utf-8")
+    tmp.replace(path)
+    return path
+
+
+def normalize_formula(text: str) -> str:
+    """Repair a formula typed in the wrong case ("KMno4", "kmno4", "nacl") by splitting each run of
+    letters into element symbols, changing as few letters' case as possible. A formula that already
+    parses and has a lower-case letter is returned unchanged, so "Co" stays cobalt and "CO" stays
+    carbon monoxide; rare elements (past Bi, noble gases) cost extra, so "BATIO3" is BaTiO3. Some
+    inputs stay ambiguous ("nico3"), so callers should show the formula they used."""
+    from pymatgen.core.periodic_table import Element
+    text = text.strip()
+    try:
+        # pymatgen otherwise accepts unknown letters as dummy species. An all-capitals formula is
+        # still re-read below, so "CUO" becomes CuO rather than carbon, uranium and oxygen.
+        if Composition(text).valid and any(ch.islower() for ch in text):
+            return text
+    except Exception:
+        pass
+    symbols = {e.symbol for e in Element}
+    # Rarely meant in a solid-state target: radioactive elements past Bi, noble gases, Tc and Pm.
+    rare = {e.symbol for e in Element if e.Z > 83 or e.group == 18 or e.symbol in ("Tc", "Pm")}
+
+    def split(run: str) -> list[str] | None:
+        best: list[tuple[int, list[str]] | None] = [None] * (len(run) + 1)
+        best[0] = (0, [])
+        for i in range(len(run)):
+            if best[i] is None:
+                continue
+            for n in (1, 2):
+                piece = run[i:i + n]
+                sym = piece[:1].upper() + piece[1:].lower()
+                if len(piece) == n and sym in symbols:
+                    cost = best[i][0] + sum(a != b for a, b in zip(piece, sym)) + 2 * (sym in rare)
+                    if best[i + n] is None or cost < best[i + n][0]:
+                        best[i + n] = (cost, best[i][1] + [sym])
+        return best[-1][1] if best[-1] else None
+
+    out = []
+    for token in re.findall(r"[A-Za-z]+|[^A-Za-z]+", text):
+        if token.isalpha():
+            parts = split(token)
+            if parts is None:
+                return text
+            out.append("".join(parts))
+        else:
+            out.append(token)
+    return "".join(out)
 
 
 def _lowest(entries: Sequence[ComputedEntry], formula: str) -> ComputedEntry | None:
