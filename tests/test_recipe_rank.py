@@ -69,3 +69,48 @@ def test_gzipped_cache_is_read(tmp_path):
     assert recipe.cached_systems(tmp_path) == ["Ba-O", "O-Ti"]
     entries = recipe._energies("Ba-O", str(tmp_path))
     assert len(entries) == 1 and entries[0].uncorrected_energy == -10.0
+
+
+@pytest.mark.parametrize("typed, expected", [
+    ("KMno4", "KMnO4"), ("kmno4", "KMnO4"), ("nacl", "NaCl"), ("BATIO3", "BaTiO3"), ("LIFEPO4", "LiFePO4"),
+    ("ca(oh)2", "Ca(OH)2"), ("CUO", "CuO"), ("CO", "CO"), ("Co", "Co"), ("CoO", "CoO"), ("BaTiO3", "BaTiO3"),
+    ("Qq2", "Qq2"),
+])
+def test_normalize_formula(typed, expected):
+    assert recipe.normalize_formula(typed) == expected
+
+
+def test_fallback_dirs_and_missing_systems(tmp_path, monkeypatch):
+    rows = [{"composition": {"Ba": 1, "O": 1}, "energy": -10.0, "correction": 0.0, "entry_id": "mp-1"}]
+    main, live = tmp_path / "main", tmp_path / "live"
+    main.mkdir()
+    live.mkdir()
+    (live / "Ba-C-O-Ti.json").write_text(json.dumps(rows), encoding="utf-8")
+    monkeypatch.setattr(recipe, "FALLBACK_DIRS", [live])
+    assert recipe.has_system("Ba-C-O-Ti", main) and "Ba-C-O-Ti" in recipe.cached_systems(main)
+    assert len(recipe._energies("Ba-C-O-Ti", str(main))) == 1
+    missing = recipe.missing_systems("BaTiO3", ["BaCO3", "TiO2", "BaO"], main)
+    assert "Ba-C-O-Ti" not in missing and "Ba-O-Ti" in missing
+
+
+def test_fetch_energies_pages_and_writes_compact_rows(tmp_path, monkeypatch):
+    import io
+    entry = {"@module": "pymatgen.entries.computed_entries", "@class": "ComputedEntry",
+             "composition": {"Ba": 1.0, "O": 1.0}, "energy": -12.0, "correction": -0.5,
+             "energy_adjustments": [], "entry_id": "mp-1-GGA", "parameters": {}, "data": {}}
+    pages = [{"data": [{"entries": {"GGA": entry}}], "meta": {"total_doc": 2}},
+             {"data": [{"entries": {"GGA": {**entry, "entry_id": "mp-2-GGA"}}}], "meta": {"total_doc": 2}}]
+    seen = []
+
+    def fake_urlopen(req, timeout):
+        seen.append(req.full_url)
+        assert req.get_header("X-api-key") == "k"
+        return io.BytesIO(json.dumps(pages[len(seen) - 1]).encode())
+    import urllib.request
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    path = recipe.fetch_energies("Ba-O", tmp_path, "k")
+    rows = json.loads(path.read_text(encoding="utf-8"))
+    assert [r["entry_id"] for r in rows] == ["mp-1-GGA", "mp-2-GGA"] and len(seen) == 2
+    assert "chemsys=Ba%2CO%2CBa-O" in seen[0] and "_skip=1" in seen[1]
+    e = recipe._energies("Ba-O", str(tmp_path))[0]
+    assert e.uncorrected_energy == -12.0 and e.correction == -0.5

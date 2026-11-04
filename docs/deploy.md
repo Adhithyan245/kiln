@@ -79,8 +79,14 @@ runs only), refuses an image that isn't in replay mode, pushes it to the Nebius 
 ## Option D: Render free web service (replay plus the recipe finder, after the hackathon)
 
 `render.yaml` describes the service, and `env/render/Dockerfile` builds it: Python 3.12, pymatgen, and the
-committed energies-only cache `data/mp-energies` (23 MB) for the recipe finder's screen. Live mode and the
-MACE check stay off.
+committed energies-only cache `data/mp-energies` (2,524 systems, 19 MB) for the recipe finder's screen. Live
+mode and the MACE check stay off.
+
+Targets are accepted in any letter case ("kmno4" is read as KMnO4, and the page says so). For a compound whose
+chemical systems are not in the committed cache, the server fetches them from the Materials Project REST API
+(up to 40 systems or 60 seconds per search) into a temporary directory, but only when the service has an
+`MP_API_KEY` environment variable. Set it in the Render dashboard (**Environment**); it is never committed.
+Without it, those pairs show as "No Materials Project data".
 
 1. Sign in at https://render.com with GitHub and allow it to read `Adhithyan245/kiln`.
 2. **New > Blueprint**, pick the repository, and apply. It builds from `main` and redeploys on every push.
