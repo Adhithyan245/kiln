@@ -82,10 +82,11 @@ Deployment (Nebius serverless endpoint, VM, Docker): `docs/deploy.md`. GPU host 
 
 ### Recipe finder (after the hackathon, unvalidated)
 
-The study asks "will these two precursors react?". The recipe finder turns it around: **name a target compound and a furnace temperature, and get the precursor pairs ranked**, with the compute each ranking cost. It is the "screen everything cheaply, spend GPU only where it changes the answer" result put to work. It is **not part of the pre-registered study**, and its rankings have not been checked against outcomes.
+The study asks "will these two precursors react?". The recipe finder turns it around: **name a target compound and a furnace temperature, and get the precursor pairs ranked**, with the compute each ranking cost. It is the "screen everything cheaply, spend GPU only where it changes the answer" result put to work. It is **not part of the pre-registered study**. Its ranking is checked against published recipes (below), not against Kiln's own outcome labels.
 
 ```bash
 uv run python -m kiln.recipe BaTiO3 --temp 900                       # rank pairs from the 46 precursors
+uv run python -m kiln.recipe BaTiO3 --temp 900 --learned --cache-dir data/mp-energies   # 159 precursors, learned ranking
 uv run python -m kiln.recipe LiMn2O4 --temp 800 --check 3 --device cpu   # MACE-check close calls
 uv run python -m kiln.recipe --compact-cache cache/mp-energies        # 23 MB energies-only cache for a server
 ```
@@ -97,8 +98,9 @@ uv run python -m kiln.recipe --compact-cache cache/mp-energies        # 23 MB en
    - the Tammann check;
    - decomposition and volatility from `data/precursor_props.csv`.
 3. **Check (1 unit each, MACE):** only leading candidates within 0.05 eV/atom of each other, where a better energy could change the order. A clear leader costs no GPU at all.
+4. **Learned ranking (`--learned`, and the app):** the screened pairs are ordered by a small pairwise logistic model (`kiln.recipe_rank`, 16 interpretable features: driving force, 0 K energy, precursor stability, precursor families, gas released, Tammann and volatility flags, melting and decomposition points against the furnace temperature, and how often each precursor appears in published recipes). It is fitted on the text-mined solid-state synthesis dataset (Kononova et al., *Sci. Data* 2019, CC BY 4.0) over 159 precursors (`data/precursor_props_extended.csv`, values sourced per row) and 2,524 Materials Project systems (`data/mp-energies`), with a 50/50 dev/test split by chemical system (`data/recipe-benchmark.jsonl`). On the 371 held-out test targets with several screenable pairs, scored once, the published pair ranks first **78%** of the time (MRR 0.87), against 6% (MRR 0.29) for ranking by driving force alone and MRR 0.45 at random. Driving force alone is worse than random because it favours energetic, gas-releasing precursors that labs rarely use. Details: `docs/recipe-ranking.md`.
 
-The app's **Recipe finder** page does the same, and links a recipe to Kiln's recorded study run when that pair was in the held-out set. The server uses `cache/mp` (full, MACE check allowed with `KILN_RECIPE_CHECK=1`) or `cache/mp-energies` (screen only). Limits: pairs only, the 46 precursors only, and solid entropy is left out.
+The app's **Recipe finder** page does the same, and links a recipe to Kiln's recorded study run when that pair was in the held-out set. The server uses the committed `data/mp-energies` with the learned ranking, or `cache/mp` (full, 46 precursors) when the MACE check is allowed with `KILN_RECIPE_CHECK=1`. Limits: pairs only, 159 precursors, solid entropy left out, and the ranking says what chemists tend to use, which is not proof that a pair reacts.
 
 **Built with:** NVIDIA ALCHEMI Toolkit (every GPU calculation in the H100 result, inside the agent loop), NVIDIA DGX Spark (GB10: profiling, dry runs, replication), MACE-MPA-0, Gemini 3.8 Flash (agent decisions), Nebius (serverless endpoint, VM, container registry), the Materials Project, pymatgen and ASE.
 

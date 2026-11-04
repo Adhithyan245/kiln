@@ -24,12 +24,31 @@ RECIPE_FORMULA = re.compile(r"[A-Z][A-Za-z0-9().]{0,39}")
 
 
 def _recipe_cache() -> Path | None:
-    """The full Materials Project cache if present, else the energies-only one: a local copy
-    (`python -m kiln.recipe --compact-cache cache/mp-energies`) or the committed `data/mp-energies`."""
-    for path in (ROOT / "cache" / "mp", ROOT / "cache" / "mp-energies", ROOT / "data" / "mp-energies"):
+    """The full Materials Project cache when the MACE check is enabled (it needs structures),
+    else the committed energies-only `data/mp-energies`, which covers the extended precursor pool,
+    else a local energies-only copy."""
+    full = (ROOT / "cache" / "mp",) if os.environ.get("KILN_RECIPE_CHECK") == "1" else ()
+    for path in (*full, ROOT / "data" / "mp-energies", ROOT / "cache" / "mp", ROOT / "cache" / "mp-energies"):
         if path.is_dir():
             return path
     return None
+
+
+_RECIPE_MODEL: dict | None = None
+
+
+def _recipe_model() -> dict:
+    """The extended precursor table and the learned ranker fitted on it, when both are present;
+    otherwise the study's 46-precursor table ranked by driving force."""
+    global _RECIPE_MODEL
+    if _RECIPE_MODEL is None:
+        from kiln import recipe_rank
+        table = ROOT / "data" / "precursor_props_extended.csv"
+        ranker = recipe_rank.Ranker.load()
+        _RECIPE_MODEL = {"table": table, "ranker": ranker} if table.is_file() and ranker else {}
+    return _RECIPE_MODEL
+
+
 _DATA_CACHE: dict[tuple, tuple[tuple, object]] = {}
 
 
@@ -218,14 +237,20 @@ class Handler(BaseHTTPRequestHandler):
             from kiln.schemas import ComputeTier
             settings = {**load_tier_settings()[ComputeTier.single_point],
                         "device": os.environ.get("KILN_RECIPE_DEVICE", "cpu")}
+        # The full cache covers only the study's 46 precursors, so it keeps their table and order.
+        model = {} if cache_dir == ROOT / "cache" / "mp" else _recipe_model()
         try:
             with _RECIPE_LOCK:
                 result = recipe.find(target, temperature, n_check=3 if check else 0,
-                                     cache_dir=cache_dir, settings=settings)
+                                     cache_dir=cache_dir, settings=settings, **model)
         except Exception:
             self.send_json({"error": "The recipe search failed on this server. Check the server log."}, 500)
             return
-        self.send_json({**result.to_dict(), "check_available": enabled})
+        ranker = model.get("ranker")
+        ranking = {"method": "learned" if ranker else "driving_force",
+                   "n_precursors": len(recipe._formulas(model.get("table", recipe.DEFAULT_TABLE))),
+                   "summary": ranker.meta.get("summary", "") if ranker else ""}
+        self.send_json({**result.to_dict(), "check_available": enabled, "ranking": ranking})
 
     def do_GET(self) -> None:
         route = urlsplit(self.path).path
