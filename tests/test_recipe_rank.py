@@ -114,3 +114,39 @@ def test_fetch_energies_pages_and_writes_compact_rows(tmp_path, monkeypatch):
     assert "chemsys=Ba%2CO%2CBa-O" in seen[0] and "_skip=1" in seen[1]
     e = recipe._energies("Ba-O", str(tmp_path))[0]
     assert e.uncorrected_energy == -12.0 and e.correction == -0.5
+
+
+def test_balance_n_matches_pairs_and_handles_other_sizes():
+    pair = recipe.balance("BaCO3", "TiO2", "BaTiO3")
+    assert pair == recipe.balance_n(("BaCO3", "TiO2"), "BaTiO3") and pair.coeffs == (1.0, 1.0)
+    triple = recipe.balance_n(("BaCO3", "CuO", "Y2O3"), "YBa2Cu3O7")
+    assert triple.coeffs == (2.0, 3.0, 0.5) and triple.gases["CO2"] == 2.0
+    single = recipe.balance_n(("Li2CO3",), "Li2O")
+    assert single.coeffs == (1.0,) and single.gases["CO2"] == 1.0
+    assert recipe.balance_n(("BaCO3", "TiO2", "BaO"), "BaTiO3") is None   # more than one way
+
+
+def test_route_sizes_and_candidate_routes():
+    assert recipe.route_sizes("CuO") == (1, 2) and recipe.route_sizes("BaTiO3") == (2,)
+    assert recipe.route_sizes("YBa2Cu3O7") == (2, 3) and recipe.route_sizes("CO2") == ()
+    pool = ["BaCO3", "CuO", "Y2O3", "TiO2", "Li2CO3"]
+    routes = {combo for combo, _ in recipe.candidate_routes("YBa2Cu3O7", pool)}
+    assert routes == {("BaCO3", "CuO", "Y2O3")}
+    assert {combo for combo, _ in recipe.candidate_routes("Li2O", pool)} == {("Li2CO3",)}
+    assert recipe.candidate_routes("YBa2Cu3O7", pool, routes="pairs") == []
+
+
+def test_doped_target_uses_the_hull_energy(tmp_path):
+    from pymatgen.entries.computed_entries import ComputedEntry
+    rows = []
+    for formula, e in {"Ba": -1.9, "Sr": -1.6, "Ti": -7.8, "O": -4.9, "BaO": -11.0, "SrO": -11.5,
+                       "TiO2": -26.9, "BaTiO3": -40.5, "SrTiO3": -41.0}.items():
+        c = ComputedEntry(formula, e)
+        rows.append({"composition": c.composition.as_dict(), "energy": e, "correction": 0.0, "entry_id": formula})
+    b = recipe.balance_n(("BaO", "SrO", "TiO2"), "Ba0.9Sr0.1TiO3")
+    (tmp_path / f"{recipe.mp.chemsys_for('BaO', 'SrO', 'TiO2')}.json").write_text(json.dumps(rows), encoding="utf-8")
+    c = recipe.screen_route("Ba0.9Sr0.1TiO3", 1200, ("BaO", "SrO", "TiO2"), b, cache_dir=tmp_path)
+    assert c.status == "ok" and c.target_from_hull and set(c.competing_phases) == {"BaTiO3", "SrTiO3"}
+    expected = (0.9 * -40.5 + 0.1 * -41.0) - (0.9 * -11.0 + 0.1 * -11.5 + -26.9)
+    assert c.dE_mp_ev_per_atom == pytest.approx(expected / (0.9 * 2 + 0.1 * 2 + 3))
+    assert any("best case" in f for f in c.flags)
