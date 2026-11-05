@@ -363,6 +363,33 @@ def normalize_formula(text: str) -> str:
     return "".join(out)
 
 
+@lru_cache(maxsize=16)
+def _lowest_index(chemsys: str, cache_dir: str) -> dict[str, ComputedEntry]:
+    """reduced formula -> lowest-energy entry for one cached system: the same answer as _lowest,
+    without scanning thousands of entries per lookup."""
+    index: dict[str, ComputedEntry] = {}
+    for e in _energies(chemsys, cache_dir):
+        f = e.composition.reduced_formula
+        if f not in index or e.energy_per_atom < index[f].energy_per_atom:
+            index[f] = e
+    return index
+
+
+@lru_cache(maxsize=4096)
+def _reduced(formula: str) -> str:
+    return Composition(formula).reduced_formula
+
+
+@lru_cache(maxsize=4096)
+def _props(formula: str, table: str, mtime: float):
+    return props(formula, path=table)
+
+
+def _table_props(formula: str, table: Path):
+    """kiln.tools.precursors.props, memoised per table file version (it re-reads the CSV each call)."""
+    return _props(formula, str(table), Path(table).stat().st_mtime)
+
+
 def _lowest(entries: Sequence[ComputedEntry], formula: str) -> ComputedEntry | None:
     target = Composition(formula).reduced_formula
     matching = [e for e in entries if e.composition.reduced_formula == target]
@@ -461,14 +488,16 @@ def screen_route(target: str, temperature_c: float, precursors: Sequence[str], b
     pair = len(precursors) == 2
     c = Candidate(precursors[0], precursors[1] if len(precursors) > 1 else "",
                   b.equation_n(precursors, target), compute_units=price, precursors=list(precursors))
+    chemsys = mp.chemsys_for(*precursors)
     try:
-        entries = list(_energies(mp.chemsys_for(*precursors), str(cache_dir)))
+        entries = _energies(chemsys, str(cache_dir))
+        index = _lowest_index(chemsys, str(cache_dir))
     except mp.MissingCache:
         c.status = "no_mp_data"
         c.flags.append("no cached Materials Project data for this " + ("pair" if pair else "recipe"))
         return c
     formulas = [f for f, _ in _species_n(b, precursors, target)]
-    found = {f: _lowest(entries, f) for f in formulas}
+    found = {f: index.get(_reduced(f)) for f in formulas}
     hull = None
     if found[target] is None:
         hull = _hull_target(target, entries, str(cache_dir))
@@ -507,7 +536,7 @@ def screen_route(target: str, temperature_c: float, precursors: Sequence[str], b
         # closed system: the a-b line is the whole story
         pa, pb = precursors
         try:
-            deepest = mp.reaction_energy(pa, pb, entries)
+            deepest = mp.reaction_energy(pa, pb, list(entries))
             c.deepest_reaction_products = deepest.products
             if Composition(target).reduced_formula not in deepest.products.split("+"):
                 c.notes.append(f"the pair's deepest reaction makes {deepest.products}, not {target}")
@@ -516,7 +545,7 @@ def screen_route(target: str, temperature_c: float, precursors: Sequence[str], b
 
     tammann = {}
     for f in precursors:
-        p = props(f, path=table)
+        p = _table_props(f, table)
         if p.melting_point_c is not None:
             tammann[f] = tammann_c(p.melting_point_c)
         if p.decomposes_at_c is not None and p.decomposes_at_c <= temperature_c:
