@@ -79,7 +79,7 @@ runs only), refuses an image that isn't in replay mode, pushes it to the Nebius 
 ## Option D: Render free web service (replay plus the recipe finder, after the hackathon)
 
 `render.yaml` describes the service, and `env/render/Dockerfile` builds it: Python 3.12, pymatgen, and the
-committed energies-only cache `data/mp-energies` (2,524 systems, 19 MB) for the recipe finder's screen. Live
+committed energies-only cache `data/mp-energies` (2,745 systems, about 22 MB) for the recipe finder's screen. Live
 mode and the MACE check stay off.
 
 Targets are accepted in any letter case ("kmno4" is read as KMnO4, and the page says so). For a compound whose
