@@ -47,7 +47,7 @@ FEATURES = ("dG", "dE_0K", "no_driving_force", "precursor_e_hull_max", "n_hydrox
 PEROXIDES = {"BaO2", "SrO2", "CaO2", "Li2O2", "Na2O2", "ZnO2", "MgO2"}
 
 
-def family_counts(a: str, b: str) -> dict[str, int]:
+def family_counts(*formulas: str) -> dict[str, int]:
     def fam(f: str) -> str:
         c = Composition(f)
         els = {e.symbol for e in c.elements}
@@ -60,7 +60,7 @@ def family_counts(a: str, b: str) -> dict[str, int]:
         if "H" in els:
             return "hydroxide"
         return "oxide"
-    fams = Counter(fam(f) for f in (a, b))
+    fams = Counter(fam(f) for f in formulas)
     return {"n_hydroxide": fams["hydroxide"], "n_peroxide": fams["peroxide"],
             "n_salt": fams["salt"], "n_carbonate": fams["carbonate"]}
 
@@ -117,9 +117,11 @@ def _table_rows(table: str) -> dict[str, dict[str, float | None]]:
                 for r in csv.DictReader(fh)}
 
 
-def thermal(a: str, b: str, temperature_c: float, table: str) -> dict[str, float]:
+def thermal(*args) -> dict[str, float]:
+    """thermal(*precursors, temperature_c, table)."""
+    *formulas, temperature_c, table = args
     rows = _table_rows(table)
-    got = [rows.get(f, {"melt": None, "dec": None}) for f in (a, b)]
+    got = [rows.get(f, {"melt": None, "dec": None}) for f in formulas]
     melts = [r["melt"] for r in got if r["melt"] is not None]
     return {"melts_below_T": float(sum(m < temperature_c for m in melts)),
             "decomposes_below_T": float(sum(r["dec"] is not None and r["dec"] < temperature_c for r in got)),
@@ -128,20 +130,20 @@ def thermal(a: str, b: str, temperature_c: float, table: str) -> dict[str, float
 
 def features(c: recipe.Candidate, b: recipe.Balanced, counts: Counter, cache_dir: str,
              temperature_c: float, table: str) -> dict[str, float]:
-    a, bb = c.precursor_a, c.precursor_b
+    precs = c.precursors
     gas_out = sum(n for g, n in b.gases.items() if n > 0)
-    atoms = b.a * Composition(a).num_atoms + b.b * Composition(bb).num_atoms
-    fam = family_counts(a, bb)
+    atoms = sum(k * Composition(f).num_atoms for k, f in zip(b.coeffs, precs))
+    fam = family_counts(*precs)
     return {
         "dG": c.dG, "dE_0K": c.dE_mp_ev_per_atom, "no_driving_force": float(c.dG >= 0),
-        "precursor_e_hull_max": max(precursor_e_hull(a, cache_dir), precursor_e_hull(bb, cache_dir)),
+        "precursor_e_hull_max": max(precursor_e_hull(f, cache_dir) for f in precs),
         **{k: float(v) for k, v in fam.items()},
         "gas_per_atom": gas_out / atoms if atoms else 0.0,
-        "log_popularity_min": math.log1p(min(counts[rb.reduced(a)], counts[rb.reduced(bb)])),
+        "log_popularity_min": math.log1p(min(counts[rb.reduced(f)] for f in precs)),
         "below_tammann": float(any("Tammann" in f for f in c.flags)),
         "volatile": float(any("volatile" in f for f in c.flags)),
-        "n_oxide": float(2 - sum(fam.values())),
-        **thermal(a, bb, temperature_c, table),
+        "n_oxide": float(len(precs) - sum(fam.values())),
+        **thermal(*precs, temperature_c, table),
     }
 
 
@@ -155,15 +157,19 @@ class Group:
 
 
 def groups(items: list[dict], pop: dict[str, Counter], cache_dir: Path,
-           table: Path = recipe.DEFAULT_TABLE) -> list[Group]:
-    """One group per benchmark target with at least two fully computed candidates and a hit."""
+           table: Path = recipe.DEFAULT_TABLE, hull_targets: bool = False) -> list[Group]:
+    """One group per benchmark target with at least two fully computed candidates and a hit.
+    By default only targets Materials Project has (as the ranker was fitted); with hull_targets=True
+    only those it lacks, screened with the hull-energy estimate."""
     out = []
     pool = recipe._formulas(table)
     for item in items:
         counts = leave_out(pop, item["target"])
         balanced = {(pa, pb): b for pa, pb, b in recipe.candidate_pairs(item["target"], pool)}
-        r = recipe.find(item["target"], item["temperature_c"], n_check=0, cache_dir=cache_dir, table=table)
-        cands = [c for c in r.candidates if c.status == "ok" and c.dG is not None]
+        r = recipe.find(item["target"], item["temperature_c"], n_check=0, cache_dir=cache_dir, table=table,
+                        routes="pairs")
+        cands = [c for c in r.candidates if c.status == "ok" and c.dG is not None
+                 and c.target_from_hull == hull_targets]
         hits = {tuple(p) for p in item["pairs"]}
         pairs = [tuple(sorted((c.precursor_a, c.precursor_b))) for c in cands]
         y = np.array([p in hits for p in pairs], dtype=float)

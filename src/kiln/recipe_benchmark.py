@@ -119,6 +119,7 @@ def _expected_random_rr(n: int, k: int) -> float:
 
 
 def score_item(item: dict, finder=recipe.find, **kwargs) -> Result:
+    kwargs.setdefault("routes", "pairs")   # the benchmark holds two-precursor recipes
     r = finder(item["target"], item["temperature_c"], n_check=0, **kwargs)
     ranked = [tuple(sorted((c.precursor_a, c.precursor_b))) for c in r.candidates]
     hits = {tuple(p) for p in item["pairs"]}

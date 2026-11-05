@@ -27,6 +27,7 @@ RECIPE_FORMULA = re.compile(r"[A-Za-z][A-Za-z0-9().]{0,39}")
 # life of the server in a writable temporary directory.
 LIVE_MP_DIR = Path(os.environ.get("KILN_LIVE_MP_DIR", Path(tempfile.gettempdir()) / "kiln-mp-live"))
 LIVE_FETCH_LIMIT, LIVE_FETCH_SECONDS = 40, 60.0
+RECIPE_SHOWN = 60   # candidates returned per search; the rest are counted, not sent
 
 
 def _recipe_cache() -> Path | None:
@@ -288,14 +289,26 @@ class Handler(BaseHTTPRequestHandler):
                    "summary": ranker.meta.get("summary", "") if ranker else ""}
         why = ""
         if not result.candidates:
-            pool = {Composition(f).reduced_formula for f in recipe._formulas(model.get("table", recipe.DEFAULT_TABLE))}
-            cations = [e.symbol for e in Composition(target).elements if e.symbol not in ("O", "C", "H", "N")]
-            if Composition(target).reduced_formula in pool:
-                why = f"{target} is itself one of Kiln's precursors, so it is bought rather than made from a pair."
-            elif len(cations) < 2:
-                why = (f"{target} has only one element besides O, C, H and N, so it comes from a single precursor "
-                       "(for example by decomposing a salt), and the finder only tries pairs.")
-        self.send_json({**result.to_dict(), "check_available": enabled, "ranking": ranking,
+            table = model.get("table", recipe.DEFAULT_TABLE)
+            pool = recipe._formulas(table)
+            reduced = {Composition(f).reduced_formula for f in pool}
+            metals = sorted(recipe.cations(target))
+            have = {m for f in pool for m in recipe.cations(f)}
+            if Composition(target).reduced_formula in reduced and len(metals) <= 1:
+                why = f"{target} is itself one of Kiln's precursors, so it is bought rather than made."
+            elif not metals:
+                why = f"{target} has no element besides O, C, H and N for a precursor to supply."
+            elif lacking := [m for m in metals if m not in have]:
+                why = f"None of Kiln's {len(pool)} precursors contains {', '.join(lacking)}."
+            else:
+                sizes = recipe.route_sizes(target)
+                why = (f"No set of {' or '.join(str(n) for n in sizes)} of Kiln's {len(pool)} precursors balances to "
+                       f"{target} with C, H and N leaving as gases and O2 exchanged with the air.")
+        d = result.to_dict()
+        d["n_screened"] = sum(c["status"] == "ok" for c in d["candidates"])
+        d["n_shown"], d["candidates"] = min(len(d["candidates"]), RECIPE_SHOWN), d["candidates"][:RECIPE_SHOWN]
+        d["route_sizes"] = sorted({len(c["precursors"]) for c in d["candidates"]})
+        self.send_json({**d, "check_available": enabled, "ranking": ranking,
                         "typed": typed, "materials_project": fetch, "why_none": why})
 
     def do_GET(self) -> None:
