@@ -60,9 +60,26 @@ Ablations on dev, cross-validated:
 
 Popularity carries the most signal. The physical features still beat random by a wide margin without it, and the four thermal features from the researched table help most when popularity is missing, which is the case that matters for rarely used precursors.
 
+## Beyond pairs and beyond the Materials Project
+
+- **Recipe sizes.** The app tries a size of recipe set by how many metals (elements other than O, C, H and N) the target has:
+  - one metal: one or two precursors, for example CuO from Cu2O, or Li2O from Li2CO3;
+  - two metals: pairs;
+  - k ≥ 3 metals: k−1 or k precursors (capped at 5), for example YBa2Cu3O7 from BaCO3 + CuO + Y2O3.
+
+  Pairs are found exactly as before. The other sizes use only precursors whose metals all appear in the target.
+- **Targets Materials Project lacks.** For a doped, non-stoichiometric or uncomputed target, the target's energy is the energy of the stable phase mixture at its composition. Ba0.9Sr0.1TiO3, for example, is treated as 0.9 BaTiO3 + 0.1 SrTiO3. A real doped or mixed phase sits at or above that energy, so the driving force is a best case, and the page says so.
+- **Checked once on test:** 189 held-out targets of this kind, scored with the same fitted ranker:
+  - learned ranker: MRR 0.85, published pair first 79% of the time;
+  - driving force alone: MRR 0.27;
+  - random order: MRR 0.43.
+
+  The in-MP test result above is unchanged: these candidates are kept out of the ranker's training and test groups.
+- **Unvalidated:** recipes of one, three or more precursors are scored by the pair model, which has not been tested on them.
+
 ## Limits
 
 - The ranking predicts what chemists tend to use, which is not proof that a pair reacts best. Text-mined recipes reflect habit and cost as well as chemistry.
-- Pairs only. Doped and non-stoichiometric targets, about 30% of the dataset's simple targets, are not in Materials Project and cannot be screened.
+- Targets with no Materials Project entry are screened against the stable phases at their composition (a best case), and recipes of other sizes are not validated (above).
 - Precursors with no Materials Project entry are shown but not ranked; most of these are acetates and oxalate hydrates.
 - With `KILN_RECIPE_CHECK=1` the server uses the full structure cache, which covers only the study's 46 precursors, and falls back to ordering by driving force.

@@ -224,10 +224,13 @@ def test_recipe_route_validates_and_screens(tmp_path, monkeypatch):
         with post({"target": "CaTiO3", "temperature_c": 1000}) as response:
             result = json.load(response)
         assert calls == [("Ca-O-Zz", tmp_path / "mp-live")] and result["materials_project"]["fetched"] == 1
+        # A single-metal target gets single-precursor routes; a metal no precursor has is named.
         with post({"target": "FeO", "temperature_c": 900}) as response:
-            assert "single precursor" in json.load(response)["why_none"]
-        with post({"target": "Fe2O3", "temperature_c": 900}) as response:
-            assert "itself one of Kiln's precursors" in json.load(response)["why_none"]
+            result = json.load(response)
+        assert result["candidates"] and 1 in result["route_sizes"]
+        assert all(len(c["precursors"]) <= 2 for c in result["candidates"])
+        with post({"target": "PuO2", "temperature_c": 900}) as response:
+            assert "contains Pu" in json.load(response)["why_none"]
     finally:
         httpd.shutdown()
         httpd.server_close()
